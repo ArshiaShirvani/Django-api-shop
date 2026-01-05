@@ -3,3 +3,8 @@ python-decouple
 django-jalali-date
 psycopg-binary
 psycopg
+djangorestframework
+markdown
+django-filter
+drf-yasg[validation]
+djangorestframework-simplejwt
