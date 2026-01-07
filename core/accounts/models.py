@@ -58,7 +58,7 @@ class User(AbstractBaseUser, PermissionsMixin):
         SUPERUSER = 'سوپرکاربر', _('سوپرکاربر')
 
     phone_number = models.CharField(
-        max_length=15,
+        max_length=11,
         unique=True,
         verbose_name="شماره تلفن"
     )
@@ -77,7 +77,7 @@ class User(AbstractBaseUser, PermissionsMixin):
     )
 
     is_active = models.BooleanField(
-        default=True,
+        default=False,
         verbose_name="وضعیت فعال"
     )
 
@@ -158,7 +158,7 @@ class Profile(models.Model):
     
     
 class OTP(models.Model):
-    phone_number = models.CharField(max_length=15)
+    phone_number = models.CharField(max_length=11,blank=True,null=True)
     code = models.CharField(max_length=6)
 
     is_used = models.BooleanField(default=False)
@@ -167,6 +167,14 @@ class OTP(models.Model):
     created_date = models.DateTimeField(auto_now_add=True)
 
     attempts = models.PositiveSmallIntegerField(default=0)
+
+
+class RefreshToken(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    token = models.CharField(max_length=255, unique=True)
+    expires_at = models.DateTimeField()
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
 
 
 
