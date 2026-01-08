@@ -80,6 +80,8 @@ class VerifyOtpView(GenericAPIView):
         refresh = RefreshToken.for_user(user)
 
         return Response({
+            "message": "ورود با موفقیت انجام شد",
+            "role":user.role,
             "access": str(refresh.access_token),
             "refresh": str(refresh),
         })
