@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: my-django-app
+    env: python
+    buildCommand: "./build.sh"
+    startCommand: "gunicorn core.wsgi:application --chdir core"
+    envVars:
+      - key: DATABASE_URL
+        value: postgresql://admin:8aXTqGZ4fkxqMsQFTdgeXNFwzoEFitL2@dpg-d5tssfnfte5s73clao0g-a/admin_ncet
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DEBUG
+        value: true
+      - key: ALLOWED_HOSTS
+        value: .onrender.com
