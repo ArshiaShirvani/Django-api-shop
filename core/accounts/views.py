@@ -42,8 +42,6 @@ class RequestOtpView(GenericAPIView):
         )
 
 
-        
-
 class VerifyOtpView(GenericAPIView):
     serializer_class = VerifyOtpSerializer
 
