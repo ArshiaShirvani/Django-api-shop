@@ -11,7 +11,7 @@ import random
 
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from .serializers import RequestOtpSerializer, VerifyOtpSerializer,LogoutSerializer
+from .serializers import RequestOtpSerializer, VerifyOtpSerializer,LogoutSerializer,CurrentUserSerializer
 from .models import User, OTP
 
 
@@ -85,6 +85,15 @@ class VerifyOtpView(GenericAPIView):
         })
 
 
+class CurrentUserApiView(APIView):
+    permission_classes = [IsAuthenticated]
+    
+    def get(self,request):
+        serilizer = CurrentUserSerializer(request.user)
+        return Response(
+            serilizer.data,
+            status=status.HTTP_200_OK
+        )
 
 
 class LogoutView(GenericAPIView):
