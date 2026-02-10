@@ -1,5 +1,5 @@
 from rest_framework import serializers
-
+from .models import User,Profile
 
 class RequestOtpSerializer(serializers.Serializer):
     phone_number = serializers.CharField(max_length=11)
@@ -39,6 +39,14 @@ class VerifyOtpSerializer(serializers.Serializer):
 
         return value
     
+    
+class CurrentUserSerializer(serializers.ModelSerializer):
+    first_name = serializers.CharField(source='profile.first_name',allow_null=True,allow_blank=True)
+    last_name = serializers.CharField(source='profile.last_name',allow_null=True,allow_blank=True)
+    
+    class Meta:
+        model = User
+        fields = ['id','phone_number','role','first_name','last_name']
     
 class LogoutSerializer(serializers.Serializer):
     refresh = serializers.CharField()
