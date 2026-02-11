@@ -81,3 +81,6 @@ class ProductImagesAdmin(admin.ModelAdmin):
     list_filter = ('product', 'is_main')
     readonly_fields = ('created_date', 'updated_date')
     search_fields = ('product__title',)
+
+
+
