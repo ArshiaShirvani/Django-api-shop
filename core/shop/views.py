@@ -17,7 +17,7 @@ from .seralizers import (
     ProductCategorySerilizer,
     ProductColorSerilizer,
     ProductSizeSerilizer,
-    ProductSerilizer,
+    ProductListSerializer,
     ProductImageSerilizer,
     ProductVariantSerilizer,
 )
@@ -25,15 +25,14 @@ from django.utils import timezone
 from datetime import timedelta
 import random
 from rest_framework_simplejwt.tokens import RefreshToken
-from django.db.models import Prefetch, F, IntegerField, ExpressionWrapper
 from django.db.models.functions import Cast
 from django.shortcuts import get_object_or_404
 from django.db.models import Prefetch
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
-
-
+from django.db.models import Min, F, ExpressionWrapper, IntegerField
+from django.db.models import Prefetch
 
 
 class TestApiView(APIView):
@@ -49,6 +48,11 @@ class ProductListApiView(APIView):
 
     def get(self, request):
 
+        final_price_expr = ExpressionWrapper(
+            F("variants__price") * (100 - F("variants__discount_percent")) / 100,
+            output_field=IntegerField()
+        )
+
         products = Product.objects.filter(
             status=ProductStatus.PUBLISHED
         ).prefetch_related(
@@ -61,47 +65,24 @@ class ProductListApiView(APIView):
                     stock__gt=0
                 ).select_related('size', 'color')
             )
+        ).annotate(
+            display_price=Min(final_price_expr)
         ).distinct()
 
-        # filtering based on category
+        
         category_slug = request.GET.get("category")
         if category_slug:
-            products = products.filter(
-                categories__slug=category_slug
-            )
+            products = products.filter(categories__slug=category_slug)
 
-        # filtering based on size
         size = request.GET.get("size")
         if size:
-            products = products.filter(
-                variants__size__title=size
-            )
+            products = products.filter(variants__size__title=size)
 
-        # filtering based on color
         color = request.GET.get("color")
         if color:
-            products = products.filter(
-                variants__color__title=color
-            )
+            products = products.filter(variants__color__title=color)
 
-        # filtering based on price range
-        min_price = request.GET.get("min_price")
-        max_price = request.GET.get("max_price")
-
-        if min_price or max_price:
-
-            final_price_expr = ExpressionWrapper(
-                F("variants__price") * (100 - F("variants__discount_percent")) / 100,
-                output_field=IntegerField()
-            )
-
-            if min_price:
-                products = products.filter(final_price_expr__gte=int(min_price))
-
-            if max_price:
-                products = products.filter(final_price_expr__lte=int(max_price))
-
-        serializer = ProductSerilizer(products, many=True)
+        serializer = ProductListSerializer(products, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
     
     
@@ -125,5 +106,5 @@ class ProductDetailApiView(APIView):
             slug=slug
         )
 
-        serializer = ProductSerilizer(product)
+        serializer = ProductListSerializer(product)
         return Response(serializer.data, status=status.HTTP_200_OK)

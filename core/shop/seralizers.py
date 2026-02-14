@@ -24,10 +24,25 @@ class ProductColorSerilizer(serializers.ModelSerializer):
         model = ProductColor
         fields = ['id','title','code']
         
-class ProductSerilizer(serializers.ModelSerializer):
+class ProductListSerializer(serializers.ModelSerializer):
+    price = serializers.IntegerField(source="display_price", read_only=True)
+    main_image = serializers.SerializerMethodField()
+
     class Meta:
         model = Product
-        fields = ['id','title','slug','description','categories','status']
+        fields = [
+            "id",
+            "title",
+            "slug",
+            "price",
+            "main_image",
+        ]
+
+    def get_main_image(self, obj):
+        image = obj.images.filter(is_main=True).first()
+        if image:
+            return image.image.url
+        return None
         
 class ProductImageSerilizer(serializers.ModelSerializer):
     class Meta:
