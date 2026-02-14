@@ -20,6 +20,7 @@ from .seralizers import (
     ProductListSerializer,
     ProductImageSerilizer,
     ProductVariantSerilizer,
+    ProductDetailSerializer
 )
 from django.utils import timezone
 from datetime import timedelta
@@ -86,6 +87,7 @@ class ProductListApiView(APIView):
         return Response(serializer.data, status=status.HTTP_200_OK)
     
     
+    
 class ProductDetailApiView(APIView):
 
     def get(self, request, slug):
@@ -99,12 +101,13 @@ class ProductDetailApiView(APIView):
                 Prefetch(
                     "variants",
                     queryset=ProductVariant.objects.filter(
-                        is_active=True
+                        is_active=True,
+                        stock__gt=0
                     ).select_related("size", "color")
                 )
             ),
             slug=slug
         )
 
-        serializer = ProductVariantSerilizer(product)
+        serializer = ProductDetailSerializer(product)
         return Response(serializer.data, status=status.HTTP_200_OK)

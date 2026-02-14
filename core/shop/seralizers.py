@@ -57,3 +57,21 @@ class ProductVariantSerilizer(serializers.ModelSerializer):
     class Meta:
         model = ProductVariant
         fields = ['id','product','size','color','price','final_price','discount_percent','stock','is_active','sku']
+        
+        
+class ProductDetailSerializer(serializers.ModelSerializer):
+    categories = ProductCategorySerilizer(many=True, read_only=True)
+    images = ProductImageSerilizer(many=True, read_only=True)
+    variants = ProductVariantSerilizer(many=True, read_only=True)
+
+    class Meta:
+        model = Product
+        fields = [
+            "id",
+            "title",
+            "slug",
+            "description",
+            "categories",
+            "images",
+            "variants",
+        ]
