@@ -106,5 +106,5 @@ class ProductDetailApiView(APIView):
             slug=slug
         )
 
-        serializer = ProductListSerializer(product)
+        serializer = ProductVariantSerilizer(product)
         return Response(serializer.data, status=status.HTTP_200_OK)
