@@ -53,9 +53,8 @@ class UserManager(BaseUserManager):
 class User(AbstractBaseUser, PermissionsMixin):
 
     class Roles(models.TextChoices):
-        USER = 'کاربر', _('کاربر')
-        ADMIN = 'ادمین', _('ادمین')
-        SUPERUSER = 'سوپرکاربر', _('سوپرکاربر')
+        USER = 'user', _('user')
+        ADMIN = 'admin', _('admin')
 
     phone_number = models.CharField(
         max_length=11,
