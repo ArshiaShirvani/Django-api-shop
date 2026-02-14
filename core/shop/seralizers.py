@@ -52,7 +52,7 @@ class ProductImageSerilizer(serializers.ModelSerializer):
 class ProductVariantSerilizer(serializers.ModelSerializer):
     size = ProductSizeSerilizer(read_only=True)
     color = ProductColorSerilizer(read_only=True)
-    final_price = serializers.IntegerField(source='final_price',read_only=True)
+    final_price = serializers.IntegerField(read_only=True)
     
     class Meta:
         model = ProductVariant

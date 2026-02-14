@@ -117,7 +117,8 @@ class ProductVariant(models.Model):
         if ProductVariant.objects.filter(product=self.product, size=self.size, color=self.color).exclude(pk=self.pk).exists():
             raise ValueError("این ترکیب محصول، سایز و رنگ قبلاً ثبت شده است")
         super().save(*args, **kwargs)
-        
+    
+    @property
     def final_price(self):
         return self.price * (100 - self.discount_percent) // 100
     
