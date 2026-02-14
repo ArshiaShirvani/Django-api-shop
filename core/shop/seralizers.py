@@ -60,9 +60,8 @@ class ProductVariantSerilizer(serializers.ModelSerializer):
         
         
 class ProductDetailSerializer(serializers.ModelSerializer):
-    categories = ProductCategorySerilizer(many=True, read_only=True)
-    images = ProductImageSerilizer(many=True, read_only=True)
     variants = ProductVariantSerilizer(many=True, read_only=True)
+    images = ProductImageSerilizer(many=True, read_only=True)
 
     class Meta:
         model = Product
@@ -71,7 +70,6 @@ class ProductDetailSerializer(serializers.ModelSerializer):
             "title",
             "slug",
             "description",
-            "categories",
             "images",
             "variants",
         ]

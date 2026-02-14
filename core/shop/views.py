@@ -96,7 +96,6 @@ class ProductDetailApiView(APIView):
             Product.objects.filter(
                 status=ProductStatus.PUBLISHED
             ).prefetch_related(
-                "categories",
                 "images",
                 Prefetch(
                     "variants",
@@ -110,4 +109,4 @@ class ProductDetailApiView(APIView):
         )
 
         serializer = ProductDetailSerializer(product)
-        return Response(serializer.data, status=status.HTTP_200_OK)
+        return Response(serializer.data)
