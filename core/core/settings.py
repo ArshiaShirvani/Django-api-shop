@@ -141,10 +141,10 @@ USE_TZ = True
 
 BASE_DIR = Path(__file__).resolve().parent
 STATIC_URL = "/static/"
-STATIC_ROOT = BASE_DIR / "staticfiles"
+STATIC_ROOT = BASE_DIR.parent / "staticfiles"
 
 MEDIA_URL = "/media/"
-MEDIA_ROOT = BASE_DIR / "media"
+MEDIA_ROOT = BASE_DIR.parent / "media"
 
 STORAGES = {
     "default": {
