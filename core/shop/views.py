@@ -34,7 +34,7 @@ from rest_framework.response import Response
 from rest_framework import status
 from django.db.models import Min, F, ExpressionWrapper, IntegerField
 from django.db.models import Prefetch
-
+from .pagination import ProductPagination
 
 class TestApiView(APIView):
 
@@ -57,20 +57,20 @@ class ProductListApiView(APIView):
         products = Product.objects.filter(
             status=ProductStatus.PUBLISHED
         ).prefetch_related(
-            'images',
-            'categories',
+            "images",
+            "categories",
             Prefetch(
-                'variants',
+                "variants",
                 queryset=ProductVariant.objects.filter(
                     is_active=True,
                     stock__gt=0
-                ).select_related('size', 'color')
+                ).select_related("size", "color")
             )
         ).annotate(
             display_price=Min(final_price_expr)
         ).distinct()
 
-        
+        # filters
         category_slug = request.GET.get("category")
         if category_slug:
             products = products.filter(categories__slug=category_slug)
@@ -83,8 +83,29 @@ class ProductListApiView(APIView):
         if color:
             products = products.filter(variants__color__title=color)
 
-        serializer = ProductListSerializer(products, many=True)
-        return Response(serializer.data, status=status.HTTP_200_OK)
+        
+        paginator = ProductPagination()
+        page = paginator.paginate_queryset(products, request)
+        product_data = ProductListSerializer(page, many=True).data
+        paginated_products = paginator.get_paginated_response(product_data).data
+
+        
+        categories = ProductCategorySerilizer(
+            ProductCategory.objects.all(),
+            many=True
+        ).data
+
+        colors = ProductColorSerilizer(
+            ProductColor.objects.all(),
+            many=True
+        ).data
+
+        return Response({
+            "products": paginated_products,
+            "categories": categories,
+            "colors": colors,
+        }, status=status.HTTP_200_OK)
+
     
     
     
