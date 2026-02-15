@@ -32,7 +32,7 @@ from django.db.models import Prefetch
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
-from django.db.models import Min, F,Q,ExpressionWrapper, IntegerField
+from django.db.models import F, Min, Q, ExpressionWrapper, IntegerField, OuterRef, Subquery, Exists
 from django.db.models import Prefetch
 from .pagination import ProductPagination
 from rest_framework.pagination import PageNumberPagination
@@ -57,40 +57,55 @@ class ProductPagination(PageNumberPagination):
 class ProductListApiView(APIView):
     def get(self, request):
 
+        # 🔹 subquery برای رنگ
+        color_code = request.GET.get("color")
+        if color_code:
+            variant_filter = ProductVariant.objects.filter(
+                product=OuterRef('pk'),
+                is_active=True,
+                stock__gt=0,
+                color__code=color_code
+            )
+            products = Product.objects.annotate(
+                has_color=Exists(variant_filter)
+            ).filter(has_color=True)
+        else:
+            products = Product.objects.all()
+
+        # 🔹 فیلتر دسته‌بندی
+        category_slug = request.GET.get("category")
+        if category_slug:
+            products = products.filter(categories__slug=category_slug)
+
+        # 🔹 فیلتر سایز
+        size = request.GET.get("size")
+        if size:
+            products = products.filter(variants__size__title=size)
+
+        # 🔹 فقط محصولات منتشر شده
+        products = products.filter(status=ProductStatus.PUBLISHED)
+
+        # 🔹 محاسبه قیمت نهایی
         final_price_expr = ExpressionWrapper(
             F("variants__price") * (100 - F("variants__discount_percent")) / 100,
             output_field=IntegerField()
         )
+        products = products.annotate(display_price=Min(final_price_expr)).distinct().order_by("-id")
 
-        # 🔹 فیلترها قبل از prefetch
-        filters = Q(status=ProductStatus.PUBLISHED)
-        category_slug = request.GET.get("category")
-        if category_slug:
-            filters &= Q(categories__slug=category_slug)
-
-        size = request.GET.get("size")
-        if size:
-            filters &= Q(variants__size__title=size)
-
-        color = request.GET.get("color")
-        if color:
-            filters &= Q(variants__color__code=color)
-
-        products = Product.objects.filter(filters).annotate(
-            display_price=Min(final_price_expr)
-        ).distinct().prefetch_related(
+        # 🔹 prefetch
+        products = products.prefetch_related(
             "images",
             "categories",
-            Prefetch(
-                "variants",
-                queryset=ProductVariant.objects.filter(is_active=True, stock__gt=0).select_related("size", "color")
-            )
-        ).order_by("-id")
+            "variants__size",
+            "variants__color"
+        )
 
+        # 🔹 pagination
         paginator = ProductPagination()
         page = paginator.paginate_queryset(products, request)
         serializer = ProductListSerializer(page, many=True, context={"request": request})
 
+        # 🔹 دسته‌بندی‌ها و رنگ‌ها برای فیلتر
         categories = ProductCategory.objects.all().values("id", "title", "slug")
         colors = ProductVariant.objects.filter(is_active=True, stock__gt=0).values(
             "color__id", "color__title", "color__code"
