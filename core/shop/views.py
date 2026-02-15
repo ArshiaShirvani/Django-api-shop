@@ -86,25 +86,25 @@ class ProductListApiView(APIView):
         
         paginator = ProductPagination()
         page = paginator.paginate_queryset(products, request)
-        product_data = ProductListSerializer(page, many=True).data
-        paginated_products = paginator.get_paginated_response(product_data).data
+        serializer = ProductListSerializer(page, many=True, context={"request": request})
 
         
-        categories = ProductCategorySerilizer(
-            ProductCategory.objects.all(),
-            many=True
-        ).data
+        categories = ProductCategory.objects.all().values("id", "title", "slug")
 
-        colors = ProductColorSerilizer(
-            ProductColor.objects.all(),
-            many=True
-        ).data
+        colors = ProductVariant.objects.filter(
+            is_active=True,
+            stock__gt=0
+        ).values(
+            "color__id",
+            "color__title"
+        ).distinct()
 
-        return Response({
-            "products": paginated_products,
-            "categories": categories,
-            "colors": colors,
-        }, status=status.HTTP_200_OK)
+        return paginator.get_paginated_response({
+            "products": serializer.data,
+            "categories": list(categories),
+            "colors": list(colors)
+        })
+
 
     
     
