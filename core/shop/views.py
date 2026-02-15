@@ -68,7 +68,7 @@ class ProductListApiView(APIView):
             )
         ).annotate(
             display_price=Min(final_price_expr)
-        ).distinct()
+        ).distinct().order_by("-id")  
 
         # filters
         category_slug = request.GET.get("category")
@@ -87,14 +87,10 @@ class ProductListApiView(APIView):
         page = paginator.paginate_queryset(products, request)
         serializer = ProductListSerializer(page, many=True, context={"request": request})
 
-        
         categories = ProductCategory.objects.all().values(
-            "id",
-            "title",
-            "slug"
+            "id", "title", "slug"
         )
 
-        
         colors = ProductVariant.objects.filter(
             is_active=True,
             stock__gt=0
@@ -104,7 +100,6 @@ class ProductListApiView(APIView):
             "color__code"
         ).distinct()
 
-        
         paginated_data = paginator.get_paginated_response(serializer.data).data
 
         return Response({
