@@ -35,6 +35,8 @@ from rest_framework import status
 from django.db.models import Min, F, ExpressionWrapper, IntegerField
 from django.db.models import Prefetch
 from .pagination import ProductPagination
+from rest_framework.pagination import PageNumberPagination
+
 
 class TestApiView(APIView):
 
@@ -45,10 +47,17 @@ class TestApiView(APIView):
         )
         
         
+
+
+class ProductPagination(PageNumberPagination):
+    page_size = 12
+    page_size_query_param = "page_size"
+    max_page_size = 50
+
 class ProductListApiView(APIView):
-
+    
     def get(self, request):
-
+        
         final_price_expr = ExpressionWrapper(
             F("variants__price") * (100 - F("variants__discount_percent")) / 100,
             output_field=IntegerField()
@@ -68,7 +77,7 @@ class ProductListApiView(APIView):
             )
         ).annotate(
             display_price=Min(final_price_expr)
-        ).distinct().order_by("-id")  
+        ).distinct().order_by("-id")
 
         # filters
         category_slug = request.GET.get("category")
@@ -87,29 +96,20 @@ class ProductListApiView(APIView):
         page = paginator.paginate_queryset(products, request)
         serializer = ProductListSerializer(page, many=True, context={"request": request})
 
-        categories = ProductCategory.objects.all().values(
-            "id", "title", "slug"
-        )
-
-        colors = ProductVariant.objects.filter(
-            is_active=True,
-            stock__gt=0
-        ).values(
-            "color__id",
-            "color__title",
-            "color__code"
+        # دسته‌بندی‌ها
+        categories = ProductCategory.objects.all().values("id", "title", "slug")
+        # رنگ‌ها با کد
+        colors = ProductVariant.objects.filter(is_active=True, stock__gt=0).values(
+            "color__id", "color__title", "color__code"
         ).distinct()
 
-        paginated_data = paginator.get_paginated_response(serializer.data).data
+        # ✅ برگردوندن response با pagination + extra fields
+        response = paginator.get_paginated_response(serializer.data)
+        response.data["categories"] = list(categories)
+        response.data["colors"] = list(colors)
 
-        return Response({
-            "count": paginated_data["count"],
-            "next": paginated_data["next"],
-            "previous": paginated_data["previous"],
-            "products": paginated_data["results"],
-            "categories": list(categories),
-            "colors": list(colors)
-        })
+        return response
+
 
 
 
