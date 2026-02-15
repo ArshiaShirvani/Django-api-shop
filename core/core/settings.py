@@ -28,7 +28,7 @@ SECRET_KEY = "django-insecure-change-this-secret-key"
 
 # SECURITY WARNING: don't run with debug turned on in production!
 # DEBUG = config('DEBUG', cast=bool, default=True)
-DEBUG = False
+DEBUG = True
 
 # ALLOWED_HOSTS = config(
 #     'ALLOWED_HOSTS',
