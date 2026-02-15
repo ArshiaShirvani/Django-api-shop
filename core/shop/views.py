@@ -32,7 +32,7 @@ from django.db.models import Prefetch
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
-from django.db.models import Min, F, ExpressionWrapper, IntegerField
+from django.db.models import Min, F,Q,ExpressionWrapper, IntegerField
 from django.db.models import Prefetch
 from .pagination import ProductPagination
 from rest_framework.pagination import PageNumberPagination
@@ -55,55 +55,47 @@ class ProductPagination(PageNumberPagination):
     max_page_size = 50
 
 class ProductListApiView(APIView):
-    
     def get(self, request):
-        
+
         final_price_expr = ExpressionWrapper(
             F("variants__price") * (100 - F("variants__discount_percent")) / 100,
             output_field=IntegerField()
         )
 
-        products = Product.objects.filter(
-            status=ProductStatus.PUBLISHED
-        ).prefetch_related(
+        # 🔹 فیلترها قبل از prefetch
+        filters = Q(status=ProductStatus.PUBLISHED)
+        category_slug = request.GET.get("category")
+        if category_slug:
+            filters &= Q(categories__slug=category_slug)
+
+        size = request.GET.get("size")
+        if size:
+            filters &= Q(variants__size__title=size)
+
+        color = request.GET.get("color")
+        if color:
+            filters &= Q(variants__color__code=color)
+
+        products = Product.objects.filter(filters).annotate(
+            display_price=Min(final_price_expr)
+        ).distinct().prefetch_related(
             "images",
             "categories",
             Prefetch(
                 "variants",
-                queryset=ProductVariant.objects.filter(
-                    is_active=True,
-                    stock__gt=0
-                ).select_related("size", "color")
+                queryset=ProductVariant.objects.filter(is_active=True, stock__gt=0).select_related("size", "color")
             )
-        ).annotate(
-            display_price=Min(final_price_expr)
-        ).distinct().order_by("-id")
-
-        # filters
-        category_slug = request.GET.get("category")
-        if category_slug:
-            products = products.filter(categories__slug=category_slug)
-
-        size = request.GET.get("size")
-        if size:
-            products = products.filter(variants__size__title=size)
-
-        color = request.GET.get("color")
-        if color:
-            products = products.filter(variants__color__code=color)
+        ).order_by("-id")
 
         paginator = ProductPagination()
         page = paginator.paginate_queryset(products, request)
         serializer = ProductListSerializer(page, many=True, context={"request": request})
 
-        # دسته‌بندی‌ها
         categories = ProductCategory.objects.all().values("id", "title", "slug")
-        # رنگ‌ها با کد
         colors = ProductVariant.objects.filter(is_active=True, stock__gt=0).values(
             "color__id", "color__title", "color__code"
         ).distinct()
 
-        # ✅ برگردوندن response با pagination + extra fields
         response = paginator.get_paginated_response(serializer.data)
         response.data["categories"] = list(categories)
         response.data["colors"] = list(colors)
