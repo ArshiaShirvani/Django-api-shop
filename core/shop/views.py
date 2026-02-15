@@ -90,7 +90,7 @@ class ProductListApiView(APIView):
 
         color = request.GET.get("color")
         if color:
-            products = products.filter(variants__color__title=color)
+            products = products.filter(variants__color__code=color)
 
         paginator = ProductPagination()
         page = paginator.paginate_queryset(products, request)
