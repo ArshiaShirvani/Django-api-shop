@@ -105,7 +105,8 @@ class ProductListApiView(APIView):
         page = paginator.paginate_queryset(products, request)
         serializer = ProductListSerializer(page, many=True, context={"request": request})
 
-        # 🔹 دسته‌بندی‌ها و رنگ‌ها برای فیلتر
+        
+        sizes = ProductSize.objects.all().values("id", "title")
         categories = ProductCategory.objects.all().values("id", "title", "slug")
         colors = ProductVariant.objects.filter(is_active=True, stock__gt=0).values(
             "color__id", "color__title", "color__code"
@@ -114,6 +115,7 @@ class ProductListApiView(APIView):
         response = paginator.get_paginated_response(serializer.data)
         response.data["categories"] = list(categories)
         response.data["colors"] = list(colors)
+        response.data["sizes"] = list(sizes)
 
         return response
     
