@@ -116,11 +116,6 @@ class ProductListApiView(APIView):
         response.data["colors"] = list(colors)
 
         return response
-
-
-
-
-    
     
     
 class ProductDetailApiView(APIView):

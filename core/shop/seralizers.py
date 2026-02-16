@@ -14,15 +14,18 @@ class ProductCategorySerilizer(serializers.ModelSerializer):
         model = ProductCategory
         fields = ['id','title','slug']
         
+        
 class ProductSizeSerilizer(serializers.ModelSerializer):
     class Meta:
         model = ProductSize
         fields = ['id','title']
         
+        
 class ProductColorSerilizer(serializers.ModelSerializer):
     class Meta:
         model = ProductColor
         fields = ['id','title','code']
+        
         
 class ProductListSerializer(serializers.ModelSerializer):
     price = serializers.IntegerField(source="display_price", read_only=True)
@@ -44,10 +47,12 @@ class ProductListSerializer(serializers.ModelSerializer):
             return image.image.url
         return None
         
+        
 class ProductImageSerilizer(serializers.ModelSerializer):
     class Meta:
         model = ProductImages
         fields = ['id','product','image','is_main']
+        
         
 class ProductVariantSerilizer(serializers.ModelSerializer):
     size = ProductSizeSerilizer(read_only=True)
