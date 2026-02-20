@@ -28,8 +28,8 @@ class ProductColorSerilizer(serializers.ModelSerializer):
         
         
 class ProductListSerializer(serializers.ModelSerializer):
-    price = serializers.IntegerField(source="display_price", read_only=True)
-    original_price = serializers.IntegerField(source="price", read_only=True)  
+    price = serializers.SerializerMethodField()           
+    original_price = serializers.SerializerMethodField()  
     main_image = serializers.SerializerMethodField()
 
     class Meta:
@@ -38,8 +38,8 @@ class ProductListSerializer(serializers.ModelSerializer):
             "id",
             "title",
             "slug",
-            "price",         
-            "original_price", 
+            "price",
+            "original_price",
             "main_image",
             "created_date",
         ]
@@ -48,6 +48,18 @@ class ProductListSerializer(serializers.ModelSerializer):
         image = obj.images.filter(is_main=True).first()
         if image:
             return image.image.url
+        return None
+
+    def get_price(self, obj):
+        variant = obj.variants.filter(is_active=True).first()
+        if variant:
+            return variant.final_price
+        return None
+
+    def get_original_price(self, obj):
+        variant = obj.variants.filter(is_active=True).first()
+        if variant:
+            return variant.price
         return None
         
         
