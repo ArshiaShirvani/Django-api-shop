@@ -39,6 +39,7 @@ class ProductListSerializer(serializers.ModelSerializer):
             "slug",
             "price",
             "main_image",
+            "created_date",
         ]
 
     def get_main_image(self, obj):
@@ -51,7 +52,7 @@ class ProductListSerializer(serializers.ModelSerializer):
 class ProductImageSerilizer(serializers.ModelSerializer):
     class Meta:
         model = ProductImages
-        fields = ['id','product','image','is_main']
+        fields = ['id','product','image','is_main','created_date']
         
         
 class ProductVariantSerilizer(serializers.ModelSerializer):
@@ -61,7 +62,7 @@ class ProductVariantSerilizer(serializers.ModelSerializer):
     
     class Meta:
         model = ProductVariant
-        fields = ['id','product','size','color','price','final_price','discount_percent','stock','is_active','sku']
+        fields = ['id','product','size','color','price','final_price','discount_percent','stock','is_active','sku','created_date']
         
         
 class ProductDetailSerializer(serializers.ModelSerializer):
@@ -77,4 +78,5 @@ class ProductDetailSerializer(serializers.ModelSerializer):
             "description",
             "images",
             "variants",
+            "created_date"
         ]
