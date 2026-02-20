@@ -54,53 +54,64 @@ class ProductPagination(PageNumberPagination):
     page_size_query_param = "page_size"
     max_page_size = 50
 
+
 class ProductListApiView(APIView):
     def get(self, request):
+        products = Product.objects.filter(status=ProductStatus.PUBLISHED)
 
-        # 🔹 subquery برای رنگ
+        
         color_code = request.GET.get("color")
         if color_code:
-            variant_filter = ProductVariant.objects.filter(
-                product=OuterRef('pk'),
+            color_variant = ProductVariant.objects.filter(
+                product=OuterRef("pk"),
                 is_active=True,
                 stock__gt=0,
                 color__code=color_code
             )
-            products = Product.objects.annotate(
-                has_color=Exists(variant_filter)
+            products = products.annotate(
+                has_color=Exists(color_variant)
             ).filter(has_color=True)
-        else:
-            products = Product.objects.all()
 
-        # 🔹 فیلتر دسته‌بندی
+        
+        size = request.GET.get("size")
+        if size:
+            size_variant = ProductVariant.objects.filter(
+                product=OuterRef("pk"),
+                is_active=True,
+                stock__gt=0,
+                size__title=size
+            )
+            products = products.annotate(
+                has_size=Exists(size_variant)
+            ).filter(has_size=True)
+
+        
         category_slug = request.GET.get("category")
         if category_slug:
             products = products.filter(categories__slug=category_slug)
 
-        # 🔹 فیلتر سایز
-        size = request.GET.get("size")
-        if size:
-            products = products.filter(variants__size__title=size)
+        
+        price_subquery = ProductVariant.objects.filter(
+            product=OuterRef("pk"),
+            is_active=True,
+            stock__gt=0
+        ).annotate(
+            final_price=F("price") * (100 - F("discount_percent")) / 100
+        ).values("final_price").order_by("final_price")[:1]
 
-        # 🔹 فقط محصولات منتشر شده
-        products = products.filter(status=ProductStatus.PUBLISHED)
-
-        # 🔹 محاسبه قیمت نهایی
-        final_price_expr = ExpressionWrapper(
-            F("variants__price") * (100 - F("variants__discount_percent")) / 100,
-            output_field=IntegerField()
+        products = products.annotate(
+            display_price=Subquery(price_subquery, output_field=IntegerField())
         )
-        products = products.annotate(display_price=Min(final_price_expr)).distinct().order_by("-id")
 
-        # 🔹 prefetch
+        
         products = products.prefetch_related(
             "images",
             "categories",
             "variants__size",
             "variants__color"
-        )
+        ).order_by("-id")
 
-        # 🔹 pagination
+        
         paginator = ProductPagination()
         page = paginator.paginate_queryset(products, request)
         serializer = ProductListSerializer(page, many=True, context={"request": request})
@@ -108,8 +119,13 @@ class ProductListApiView(APIView):
         
         sizes = ProductSize.objects.all().values("id", "title")
         categories = ProductCategory.objects.all().values("id", "title", "slug")
-        colors = ProductVariant.objects.filter(is_active=True, stock__gt=0).values(
-            "color__id", "color__title", "color__code"
+        colors = ProductVariant.objects.filter(
+            is_active=True,
+            stock__gt=0
+        ).values(
+            "color__id",
+            "color__title",
+            "color__code"
         ).distinct()
 
         response = paginator.get_paginated_response(serializer.data)
