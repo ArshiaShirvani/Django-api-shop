@@ -29,7 +29,8 @@ class ProductColorSerilizer(serializers.ModelSerializer):
         
 class ProductListSerializer(serializers.ModelSerializer):
     price = serializers.SerializerMethodField()           
-    original_price = serializers.SerializerMethodField()  
+    original_price = serializers.SerializerMethodField()
+    discount_percent = serializers.SerializerMethodField()  
     main_image = serializers.SerializerMethodField()
 
     class Meta:
@@ -40,6 +41,7 @@ class ProductListSerializer(serializers.ModelSerializer):
             "slug",
             "price",
             "original_price",
+            "discount_percent",
             "main_image",
             "created_date",
         ]
@@ -60,6 +62,12 @@ class ProductListSerializer(serializers.ModelSerializer):
         variant = obj.variants.filter(is_active=True).first()
         if variant:
             return variant.price
+        return None
+    
+    def get_discount_percent(self, obj):
+        variant = obj.variants.filter(is_active=True).first()
+        if variant:
+            return variant.discount_percent
         return None
         
         
