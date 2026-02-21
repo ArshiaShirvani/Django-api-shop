@@ -65,13 +65,13 @@ class ProductListApiView(APIView):
         )
 
         
-        color_code = request.GET.get("color")
-        if color_code:
+        color_title = request.GET.get("color")
+        if color_title:
             color_variant = ProductVariant.objects.filter(
                 product=OuterRef("pk"),
                 is_active=True,
                 stock__gt=0,
-                color__code=color_code
+                color__title=color_title
             )
             products = products.annotate(
                 has_color=Exists(color_variant)
