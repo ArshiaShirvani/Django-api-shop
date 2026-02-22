@@ -129,7 +129,7 @@ class ProductListApiView(APIView):
         )
 
         
-        ordering = request.GET.get("ordering")
+        ordering = request.GET.get("sort")
 
         if ordering == "newest":
             products = products.order_by("-id")
