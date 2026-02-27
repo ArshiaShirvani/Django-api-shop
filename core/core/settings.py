@@ -57,6 +57,7 @@ INSTALLED_APPS = [
     'shop',
     'cart',
     'order',
+    'payment'
 ]
 
 MIDDLEWARE = [
@@ -186,3 +187,13 @@ SIMPLE_JWT = {
 }
 
 CORS_ALLOW_ALL_ORIGINS = True
+
+
+# Zarinpal Config
+
+ZARINPAL_MERCHANT_ID = "4ced0a1e-4ad8-4309-9668-3ea3ae8e8897"
+
+ZARINPAL_CALLBACK_URL = "https://ar7shia.pythonanywhere.com/payment/verify/"
+
+PAYMENT_SUCCESS_URL = "http://localhost:3000/payment/success"
+PAYMENT_FAILED_URL = "http://localhost:3000/payment/failed"
