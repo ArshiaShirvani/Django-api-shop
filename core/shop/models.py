@@ -10,6 +10,9 @@ class ProductStatus(models.IntegerChoices):
 class ProductCategory(models.Model):
     title = models.CharField(max_length=200, unique=True,verbose_name='عنوان دسته بندی')
     slug = models.SlugField(max_length=200, unique=True,allow_unicode=True,verbose_name='اسلاگ دسته بندی')
+    image = models.ImageField(upload_to='shop/categories/images/',verbose_name='عکس',null=True,blank=True)
+    
+    parent = models.ForeignKey("self",on_delete=models.CASCADE,null=True,blank=True,related_name="children")
     
     created_date = models.DateTimeField(auto_now_add=True,verbose_name='تاریخ ایجاد')
     updated_date = models.DateTimeField(auto_now=True,verbose_name='تاریخ آخرین بروزرسانی')
@@ -20,6 +23,20 @@ class ProductCategory(models.Model):
     class Meta:
         verbose_name = 'دسته بندی محصول'
         verbose_name_plural = 'دسته بندی محصولات'
+    
+    @property
+    def is_root(self):
+        return self.parent is None
+
+class Feature(models.Model):
+    title = models.CharField(max_length=255)
+    
+    class Meta:
+        verbose_name = 'ویژگی'
+        verbose_name_plural = 'ویژگی ها'
+        
+    def __str__(self):
+        return self.title
         
     
 class Product(models.Model):
@@ -120,7 +137,23 @@ class ProductVariant(models.Model):
     
     @property
     def final_price(self):
-        return self.price * (100 - self.discount_percent) // 100
+        price = self.price or 0
+        discount = self.discount_percent or 0
+        return price * (100 - discount) // 100
     
     def __str__(self):
         return f"{self.product.title} - {self.size.title} - {self.color.title}"
+    
+    
+class FeatureValue(models.Model):
+    product = models.ForeignKey(Product,related_name="feature_values",on_delete=models.CASCADE,verbose_name="محصول")
+    feature = models.ForeignKey(Feature,on_delete=models.PROTECT,verbose_name="ویژگی")
+    value = models.CharField(max_length=255,verbose_name="مقدار")
+    
+    class Meta:
+        verbose_name = 'مقدار ویژگی محصول'
+        verbose_name_plural = 'مقادیر ویژگی محصولات'
+        
+    
+    def __str__(self):
+        return self.product.title
