@@ -1,86 +1,155 @@
 from django.contrib import admin
+from django.utils.html import format_html
 from .models import (
-    ProductCategory,
     Product,
+    ProductCategory,
     ProductSize,
     ProductColor,
+    ProductVariant,
     ProductImages,
-    ProductVariant
+    Feature,
+    FeatureValue
 )
 
+
+@admin.register(ProductCategory)
+class ProductCategoryAdmin(admin.ModelAdmin):
+    list_display = ("title", "parent", "is_root", "created_date")
+    list_filter = ("parent",)
+    search_fields = ("title", "slug")
+    prepopulated_fields = {"slug": ("title",)}
+    ordering = ("parent", "title")
 
 
 class ProductImagesInline(admin.TabularInline):
     model = ProductImages
     extra = 1
-    fields = ('image', 'is_main', 'created_date', 'updated_date')
-    readonly_fields = ('created_date', 'updated_date')
-    show_change_link = True
-    
-    def has_delete_permission(self, request, obj=None):
-        if obj:
-            main_images = obj.images.filter(is_main=True)
-            if main_images.count() <= 1:
-                return False  
-        return super().has_delete_permission(request, obj)
+    readonly_fields = ("image_preview",)
+    fields = ("image", "image_preview", "is_main")
+
+    def image_preview(self, obj):
+        if obj.image:
+            return format_html('<img src="{}" width="70" />', obj.image.url)
+        return "-"
+    image_preview.short_description = "پیش نمایش"
+
 
 
 class ProductVariantInline(admin.TabularInline):
     model = ProductVariant
     extra = 1
-    fields = ('size', 'color', 'price', 'discount_percent', 'stock', 'is_active', 'sku', 'created_date', 'updated_date')
-    readonly_fields = ('created_date', 'updated_date')
-    show_change_link = True
+    readonly_fields = ("final_price",)
+    fields = (
+        "size",
+        "color",
+        "price",
+        "discount_percent",
+        "final_price",
+        "stock",
+        "is_active",
+        "sku",
+    )
 
-    def save_new(self, form, commit=True):
-        
-        instance = form.save(commit=False)
-        if ProductVariant.objects.filter(product=instance.product, size=instance.size, color=instance.color).exists():
-            raise ValueError("این ترکیب محصول، سایز و رنگ قبلاً ثبت شده است.")
-        if commit:
-            instance.save()
-        return instance
+
+class FeatureValueInline(admin.TabularInline):
+    model = FeatureValue
+    extra = 1
+
 
 
 @admin.register(Product)
 class ProductAdmin(admin.ModelAdmin):
-    list_display = ('title', 'status', 'created_date', 'updated_date')
-    list_filter = ('status', 'categories')
-    search_fields = ('title', 'description')
-    prepopulated_fields = {'slug': ('title',)}
-    inlines = [ProductImagesInline, ProductVariantInline]
-    filter_horizontal = ('categories',)
-    readonly_fields = ('created_date', 'updated_date')
+    list_display = (
+        "title",
+        "status",
+        "category_list",
+        "created_date"
+    )
+
+    list_filter = ("status", "categories")
+    search_fields = ("title", "slug", "description")
+    prepopulated_fields = {"slug": ("title",)}
+    filter_horizontal = ("categories",)
+
+    inlines = [
+        ProductImagesInline,
+        ProductVariantInline,
+        FeatureValueInline
+    ]
+
+    def category_list(self, obj):
+        return ", ".join([c.title for c in obj.categories.all()])
+    category_list.short_description = "دسته بندی ها"
 
 
-@admin.register(ProductCategory)
-class ProductCategoryAdmin(admin.ModelAdmin):
-    list_display = ('title', 'slug', 'created_date', 'updated_date')
-    prepopulated_fields = {'slug': ('title',)}
-    search_fields = ('title',)
-    readonly_fields = ('created_date', 'updated_date')
 
+@admin.register(ProductVariant)
+class ProductVariantAdmin(admin.ModelAdmin):
+    list_display = (
+        "product",
+        "size",
+        "color_display",
+        "price",
+        "discount_percent",
+        "final_price",
+        "stock",
+        "is_active"
+    )
 
-@admin.register(ProductSize)
-class ProductSizeAdmin(admin.ModelAdmin):
-    list_display = ('title', 'created_date', 'updated_date')
-    search_fields = ('title',)
-    readonly_fields = ('created_date', 'updated_date')
+    list_filter = ("is_active", "color", "size")
+    search_fields = ("product__title", "sku")
+    readonly_fields = ("final_price",)
+
+    def color_display(self, obj):
+        return format_html(
+            '<span style="display:inline-block;width:20px;height:20px;background:{};border-radius:4px;"></span> {}',
+            obj.color.code,
+            obj.color.title
+        )
+    color_display.short_description = "رنگ"
+
 
 
 @admin.register(ProductColor)
 class ProductColorAdmin(admin.ModelAdmin):
-    list_display = ('title', 'code', 'created_date', 'updated_date')
-    search_fields = ('title', 'code')
-    readonly_fields = ('created_date', 'updated_date')
+    list_display = ("title", "color_preview", "code")
+    search_fields = ("title", "code")
+
+    def color_preview(self, obj):
+        return format_html(
+            '<span style="display:inline-block;width:30px;height:20px;background:{};"></span>',
+            obj.code
+        )
+    color_preview.short_description = "نمایش رنگ"
+
+
+
+@admin.register(ProductSize)
+class ProductSizeAdmin(admin.ModelAdmin):
+    search_fields = ("title",)
+
+
+@admin.register(Feature)
+class FeatureAdmin(admin.ModelAdmin):
+    search_fields = ("title",)
 
 
 @admin.register(ProductImages)
 class ProductImagesAdmin(admin.ModelAdmin):
-    list_display = ('product', 'is_main', 'created_date', 'updated_date')
-    list_filter = ('product', 'is_main')
-    readonly_fields = ('created_date', 'updated_date')
-    search_fields = ('product__title',)
+    list_display = ("product", "image_preview", "is_main", "created_date")
+    list_filter = ("is_main",)
+    readonly_fields = ("image_preview",)
+
+    def image_preview(self, obj):
+        if obj.image:
+            return format_html('<img src="{}" width="80" />', obj.image.url)
+        return "-"
+    image_preview.short_description = "پیش نمایش"
 
 
 
+@admin.register(FeatureValue)
+class FeatureValueAdmin(admin.ModelAdmin):
+    list_display = ("product", "feature", "value")
+    list_filter = ("feature",)
+    search_fields = ("product__title", "value")
