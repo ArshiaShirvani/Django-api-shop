@@ -3,6 +3,7 @@ from accounts.models import User
 from django.core.validators import MaxValueValidator,MinValueValidator
 from shop.models import ProductVariant,Product
 from django.utils import timezone
+from payment.models import PaymentModel
 
 class OrderStatusType(models.IntegerChoices):
     PENDING = 1,"در انتظار پرداخت"
@@ -78,6 +79,13 @@ class OrderModel(models.Model):
     shipping_method = models.IntegerField(choices=ShippingMethodType.choices,verbose_name="روش ارسال")
     
     status = models.IntegerField(choices=OrderStatusType.choices, default=OrderStatusType.PENDING,verbose_name="وضعیت")
+    payment = models.OneToOneField(
+        PaymentModel,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="order"
+    )
     
     created_date = models.DateTimeField(auto_now_add=True,verbose_name='تاریخ ایجاد')
     updated_date = models.DateTimeField(auto_now=True,verbose_name='تاریخ آخرین بروزرسانی')
