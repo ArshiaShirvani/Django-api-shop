@@ -37,7 +37,7 @@ class CartItem(models.Model):
     
     @property
     def price(self):
-        return self.variant.final_price()
+        return self.variant.final_price
 
     @property
     def subtotal(self):
