@@ -20,8 +20,10 @@ class ProductCategorySerilizer(serializers.ModelSerializer):
         fields = ["id", "title", "slug", "parent", "children"]
 
     def get_children(self, obj):
-        qs = obj.children.filter(is_active=True)
-        return ProductCategorySerilizer(qs, many=True).data
+        return ProductCategorySerilizer(
+            obj.children.all(),
+            many=True
+        ).data
 
 
 
@@ -47,7 +49,7 @@ class ProductListSerializer(serializers.ModelSerializer):
     original_price = serializers.SerializerMethodField()
     discount_percent = serializers.SerializerMethodField()
     main_image = serializers.SerializerMethodField()
-    category = ProductCategorySerilizer(read_only=True)
+    categories = ProductCategorySerilizer(many=True, read_only=True)
 
     class Meta:
         model = Product
@@ -55,7 +57,7 @@ class ProductListSerializer(serializers.ModelSerializer):
             "id",
             "title",
             "slug",
-            "category",
+            "categories",
             "price",
             "original_price",
             "discount_percent",
@@ -68,7 +70,10 @@ class ProductListSerializer(serializers.ModelSerializer):
         return image.image.url if image else None
 
     def _get_active_variant(self, obj):
-        return obj.variants.filter(is_active=True, stock__gt=0).first()
+        return obj.variants.filter(
+            is_active=True,
+            stock__gt=0
+        ).order_by("-discount_percent", "price").first()
 
     def get_price(self, obj):
         variant = self._get_active_variant(obj)
