@@ -1,219 +1,474 @@
-from rest_framework.views import APIView
-from rest_framework.response import Response
 from django.shortcuts import get_object_or_404
-
 from django.db.models import (
-    F, OuterRef, Subquery, Exists,
-    IntegerField, Prefetch, Q
+    Exists,
+    OuterRef,
+    Prefetch,
+    IntegerField,
+    F,
+    Subquery,
+    Q,
 )
 
+from rest_framework.views import APIView
+from rest_framework.response import Response
 from rest_framework.pagination import PageNumberPagination
 
 from .models import (
     Product,
     ProductCategory,
-    ProductSize,
     ProductVariant,
-    ProductStatus
+    ProductImages,
+    ProductSize,
+    ProductStatus,
+    FeatureValue
 )
 
 from .seralizers import (
     ProductListSerializer,
-    ProductDetailSerializer
+    ProductDetailSerializer,
 )
 
 
+
+# ==========================================
+# Pagination
+# ==========================================
+
 class ProductPagination(PageNumberPagination):
+
     page_size = 18
+
     page_size_query_param = "page_size"
-    max_page_size = 50
+
+    max_page_size = 60
 
 
+# ==========================================
+# Base Query
+# ==========================================
 
-class ProductListApiView(APIView):
+class ProductBaseMixin:
+
+    def get_queryset(self):
+
+        best_variant = ProductVariant.objects.filter(
+            product=OuterRef("pk"),
+            is_active=True,
+            stock__gt=0,
+        ).annotate(
+            final_price=(
+                F("price") *
+                (100 - F("discount_percent"))
+            ) / 100
+        ).order_by(
+            "final_price"
+        )
+
+        return (
+            Product.objects.filter(
+                status=ProductStatus.PUBLISHED
+            )
+            .annotate(
+
+                best_variant_price=Subquery(
+                    best_variant.values(
+                        "final_price"
+                    )[:1],
+                    output_field=IntegerField()
+                ),
+
+                best_variant_original_price=Subquery(
+                    best_variant.values(
+                        "price"
+                    )[:1]
+                ),
+
+                best_variant_discount=Subquery(
+                    best_variant.values(
+                        "discount_percent"
+                    )[:1]
+                )
+
+            )
+            .prefetch_related(
+
+                "categories",
+
+                
+
+            )
+        )
+
+class ProductListApiView(ProductBaseMixin, APIView):
+
+    pagination_class = ProductPagination
+
+    def get_category_children(self, category):
+
+        ids = [category.id]
+
+        children = list(
+            category.children.all()
+        )
+
+        for child in children:
+
+            ids.extend(
+                self.get_category_children(
+                    child
+                )
+            )
+
+        return ids
 
     def get(self, request):
 
-        products = Product.objects.filter(
-            status=ProductStatus.PUBLISHED
-        )
+        products = self.get_queryset()
 
-        
-        best_variant_qs = ProductVariant.objects.filter(
-            product=OuterRef("pk"),
-            is_active=True,
-            stock__gt=0
-        ).annotate(
-            final_price=F("price") * (100 - F("discount_percent")) / 100
-        ).order_by("-discount_percent", "final_price")
+        # ---------------------------------
+        # Category
+        # ---------------------------------
 
-        products = products.annotate(
-            best_variant_price=Subquery(
-                best_variant_qs.values("final_price")[:1],
-                output_field=IntegerField()
-            ),
-            best_variant_original_price=Subquery(
-                best_variant_qs.values("price")[:1]
-            ),
-            best_variant_discount=Subquery(
-                best_variant_qs.values("discount_percent")[:1]
-            )
-        )
-
-        
         category_slug = request.GET.get("category")
+
         if category_slug:
-            products = products.filter(categories__slug=category_slug)
 
-        
-        color_code = request.GET.get("color")
-        if color_code:
-            color_variant = ProductVariant.objects.filter(
-                product=OuterRef("pk"),
-                is_active=True,
-                stock__gt=0,
-                color__code=color_code
+            category = get_object_or_404(
+                ProductCategory,
+                slug=category_slug
             )
-            products = products.annotate(
-                has_color=Exists(color_variant)
-            ).filter(has_color=True)
 
-        
-        size_title = request.GET.get("size")
-        if size_title:
-            size_variant = ProductVariant.objects.filter(
-                product=OuterRef("pk"),
-                is_active=True,
-                stock__gt=0,
-                size__title=size_title
+            ids = self.get_category_children(
+                category
             )
-            products = products.annotate(
-                has_size=Exists(size_variant)
-            ).filter(has_size=True)
 
-        
+            products = products.filter(
+                categories__id__in=ids
+            ).distinct()
+
+        # ---------------------------------
+        # Search
+        # ---------------------------------
+
+        search = request.GET.get("search")
+
+        if search:
+
+            products = products.filter(
+
+                Q(title__icontains=search)
+
+                |
+
+                Q(
+                    brief_description__icontains=search
+                )
+
+            )
+
+        # ---------------------------------
+        # Color
+        # ---------------------------------
+
+        colors = request.GET.getlist("color")
+
+        if colors:
+
+            products = products.filter(
+
+                variants__color__code__in=colors,
+
+                variants__is_active=True,
+
+                variants__stock__gt=0
+
+            ).distinct()
+
+        # ---------------------------------
+        # Size
+        # ---------------------------------
+
+        sizes = request.GET.getlist("size")
+
+        if sizes:
+
+            products = products.filter(
+
+                variants__size__title__in=sizes,
+
+                variants__is_active=True,
+
+                variants__stock__gt=0
+
+            ).distinct()
+            
+         # ---------------------------------
+        # Price
+        # ---------------------------------
+
         min_price = request.GET.get("min_price")
         max_price = request.GET.get("max_price")
 
-        price_variant = ProductVariant.objects.filter(
-            product=OuterRef("pk"),
-            is_active=True,
-            stock__gt=0
-        ).annotate(
-            final_price=F("price") * (100 - F("discount_percent")) / 100
+        try:
+            if min_price:
+                min_price = int(min_price)
+
+                products = products.filter(
+                    best_variant_price__gte=min_price
+                )
+
+            if max_price:
+                max_price = int(max_price)
+
+                products = products.filter(
+                    best_variant_price__lte=max_price
+                )
+
+        except (TypeError, ValueError):
+            pass
+
+        # ---------------------------------
+        # Sort
+        # ---------------------------------
+
+        ordering = request.GET.get(
+            "sort",
+            "newest"
         )
 
-        if min_price:
-            price_variant = price_variant.filter(final_price__gte=min_price)
+        ordering_map = {
 
-        if max_price:
-            price_variant = price_variant.filter(final_price__lte=max_price)
+            "newest": "-created_date",
 
-        if min_price or max_price:
-            products = products.annotate(
-                has_price=Exists(price_variant)
-            ).filter(has_price=True)
+            "oldest": "created_date",
 
-        
-        ordering = request.GET.get("sort")
+            "price_asc": "best_variant_price",
 
-        if ordering == "price_asc":
-            products = products.order_by("best_variant_price")
+            "price_desc": "-best_variant_price",
 
-        elif ordering == "price_desc":
-            products = products.order_by("-best_variant_price")
+            "discount": "-best_variant_discount",
 
-        elif ordering == "oldest":
-            products = products.order_by("created_date")
+        }
 
-        else:  
-            products = products.order_by("-created_date")
+        products = products.order_by(
 
-        
-        products = products.prefetch_related(
-            "images",
-            "categories"
+            ordering_map.get(
+                ordering,
+                "-created_date"
+            )
+
         )
 
-        
-        paginator = ProductPagination()
-        page = paginator.paginate_queryset(products, request)
+        # ---------------------------------
+        # Pagination
+        # ---------------------------------
+
+        paginator = self.pagination_class()
+
+        page = paginator.paginate_queryset(
+            products,
+            request
+        )
 
         serializer = ProductListSerializer(
+
             page,
+
             many=True,
-            context={"request": request}
+
+            context={
+                "request": request
+            }
+
         )
 
-        
-        categories = ProductCategory.objects.all().values("id", "title", "slug")
-        sizes = ProductSize.objects.all().values("id", "title")
+        # ---------------------------------
+        # Filters
+        # ---------------------------------
+
+        categories = ProductCategory.objects.values(
+
+            "id",
+
+            "title",
+
+            "slug"
+
+        )
+
+        sizes = ProductSize.objects.values(
+
+            "id",
+
+            "title"
+
+        )
 
         colors = ProductVariant.objects.filter(
+
             is_active=True,
+
             stock__gt=0
+
         ).values(
+
             "color__id",
+
             "color__title",
+
             "color__code"
+
         ).distinct()
 
-        response = paginator.get_paginated_response(serializer.data)
-        response.data["categories"] = list(categories)
-        response.data["colors"] = list(colors)
-        response.data["sizes"] = list(sizes)
+        response = paginator.get_paginated_response(
+            serializer.data
+        )
+
+        response.data["filters"] = {
+
+            "categories": list(categories),
+
+            "sizes": list(sizes),
+
+            "colors": list(colors),
+
+        }
 
         return response
-    
 
-class ProductDetailApiView(APIView):
+class ProductDetailApiView(ProductBaseMixin, APIView):
 
     def get(self, request, slug):
 
-        best_variant_qs = ProductVariant.objects.filter(
-            product=OuterRef("pk"),
-            is_active=True,
-            stock__gt=0
-        ).order_by("-discount_percent", "price")
+
+        # ---------------------------------
+        # Product Query
+        # ---------------------------------
 
         product = get_object_or_404(
-            Product.objects.filter(
-                status=ProductStatus.PUBLISHED
-            ).annotate(
-                default_variant_id=Subquery(
-                    best_variant_qs.values("id")[:1]
-                )
-            ).prefetch_related(
-                "images",
+
+            self.get_queryset()
+
+            .prefetch_related(
+
+                "categories",
+
+                Prefetch(
+                    "images",
+                    queryset=ProductImages.objects.order_by(
+                        "-is_main"
+                    )
+                ),
+
+
                 Prefetch(
                     "variants",
+
                     queryset=ProductVariant.objects.filter(
+
                         is_active=True,
+
                         stock__gt=0
-                    ).select_related("size", "color")
+
+                    )
+                    .select_related(
+
+                        "size",
+
+                        "color"
+
+                    )
+
                 ),
-                "categories"
+
+
+                Prefetch(
+
+                    "feature_values",
+
+                    queryset=FeatureValue.objects.select_related(
+
+                        "feature"
+
+                    )
+
+                )
+
             ),
+
             slug=slug
+
         )
 
-        
-        product_categories = product.categories.values_list("id", flat=True)
 
-        similar_products = Product.objects.filter(
-            status=ProductStatus.PUBLISHED,
-            categories__in=product_categories
-        ).exclude(id=product.id).distinct()[:4]
+        # ---------------------------------
+        # Similar Products
+        # ---------------------------------
+
+        category_ids = product.categories.values_list(
+
+            "id",
+
+            flat=True
+
+        )
+
+
+        similar_products = (
+
+            self.get_queryset()
+
+            .filter(
+
+                categories__in=category_ids
+
+            )
+
+            .exclude(
+
+                id=product.id
+
+            )
+
+            .distinct()
+
+            [:8]
+
+        )
+
 
         similar_serializer = ProductListSerializer(
+
             similar_products,
+
             many=True,
-            context={"request": request}
+
+            context={
+
+                "request":request
+
+            }
+
         )
 
-        serializer = ProductDetailSerializer(product)
+
+        serializer = ProductDetailSerializer(
+
+            product,
+
+            context={
+
+                "request":request
+
+            }
+
+        )
+
 
         return Response({
+
             "product": serializer.data,
+
             "similar_products": similar_serializer.data
+
         })
