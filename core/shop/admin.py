@@ -1,155 +1,387 @@
 from django.contrib import admin
 from django.utils.html import format_html
+
 from .models import (
     Product,
     ProductCategory,
+    ProductImages,
+    ProductVariant,
     ProductSize,
     ProductColor,
-    ProductVariant,
-    ProductImages,
     Feature,
-    FeatureValue
+    FeatureValue,
 )
 
 
-@admin.register(ProductCategory)
-class ProductCategoryAdmin(admin.ModelAdmin):
-    list_display = ("title", "parent", "is_root", "created_date")
-    list_filter = ("parent",)
-    search_fields = ("title", "slug")
-    prepopulated_fields = {"slug": ("title",)}
-    ordering = ("parent", "title")
+# ======================================
+# IMAGE INLINE
+# ======================================
 
+class ProductImageInline(
+    admin.TabularInline
+):
 
-class ProductImagesInline(admin.TabularInline):
     model = ProductImages
+
     extra = 1
-    readonly_fields = ("image_preview",)
-    fields = ("image", "image_preview", "is_main")
 
-    def image_preview(self, obj):
-        if obj.image:
-            return format_html('<img src="{}" width="70" />', obj.image.url)
-        return "-"
-    image_preview.short_description = "پیش نمایش"
-
-
-
-class ProductVariantInline(admin.TabularInline):
-    model = ProductVariant
-    extra = 1
-    readonly_fields = ("final_price",)
     fields = (
-        "size",
-        "color",
-        "price",
-        "discount_percent",
-        "final_price",
-        "stock",
-        "is_active",
-        "sku",
+        "image",
+        "preview",
+        "is_main",
+    )
+
+    readonly_fields = (
+        "preview",
     )
 
 
-class FeatureValueInline(admin.TabularInline):
-    model = FeatureValue
+    def preview(self, obj):
+
+        if obj.image:
+
+            return format_html(
+
+                '<img src="{}" width="80" height="80" style="object-fit:cover;">',
+
+                obj.image.url
+
+            )
+
+        return "-"
+
+    preview.short_description = "پیش نمایش"
+
+
+# ======================================
+# VARIANT INLINE
+# ======================================
+
+class ProductVariantInline(
+    admin.TabularInline
+):
+
+    model = ProductVariant
+
     extra = 1
 
+    fields = (
+
+        "size",
+
+        "color",
+
+        "price",
+
+        "discount_percent",
+
+        "final_price",
+
+        "stock",
+
+        "is_active",
+
+        "sku",
+
+    )
+
+
+    readonly_fields = (
+
+        "final_price",
+
+    )
+
+
+    def final_price(self,obj):
+
+        if obj:
+
+            return f"{obj.final_price:,} تومان"
+
+        return "-"
+
+    final_price.short_description = "قیمت نهایی"
+
+
+
+# ======================================
+# FEATURE INLINE
+# ======================================
+
+class FeatureValueInline(
+    admin.TabularInline
+):
+
+    model = FeatureValue
+
+    extra = 1
+
+
+
+# ======================================
+# PRODUCT ADMIN
+# ======================================
 
 
 @admin.register(Product)
 class ProductAdmin(admin.ModelAdmin):
+
+
     list_display = (
+
         "title",
+
         "status",
-        "category_list",
-        "created_date"
+
+        "thumbnail",
+
+        "created_date",
+
     )
 
-    list_filter = ("status", "categories")
-    search_fields = ("title", "slug", "description")
-    prepopulated_fields = {"slug": ("title",)}
-    filter_horizontal = ("categories",)
 
-    inlines = [
-        ProductImagesInline,
+    list_filter = (
+
+        "status",
+
+        "categories",
+
+    )
+
+
+    search_fields = (
+
+        "title",
+
+        "slug",
+
+        "brief_description",
+
+    )
+
+
+    prepopulated_fields = {
+
+        "slug":(
+            "title",
+        )
+
+    }
+
+
+    filter_horizontal = (
+
+        "categories",
+
+    )
+
+
+    readonly_fields = (
+
+        "thumbnail",
+
+    )
+
+
+    inlines = (
+
+        ProductImageInline,
+
         ProductVariantInline,
-        FeatureValueInline
-    ]
 
-    def category_list(self, obj):
-        return ", ".join([c.title for c in obj.categories.all()])
-    category_list.short_description = "دسته بندی ها"
+        FeatureValueInline,
 
+    )
+
+
+
+    def thumbnail(self,obj):
+
+        image = obj.main_image
+
+
+        if image:
+
+            return format_html(
+
+                '<img src="{}" width="60" height="60" style="object-fit:cover;">',
+
+                image.image.url
+
+            )
+
+        return "-"
+
+
+
+    thumbnail.short_description = "تصویر"
+
+
+
+# ======================================
+# CATEGORY ADMIN
+# ======================================
+
+
+@admin.register(ProductCategory)
+class ProductCategoryAdmin(admin.ModelAdmin):
+
+
+    list_display = (
+
+        "title",
+
+        "parent",
+
+        "created_date",
+
+    )
+
+
+    search_fields = (
+
+        "title",
+
+        "slug",
+
+    )
+
+
+    prepopulated_fields = {
+
+        "slug":(
+            "title",
+        )
+
+    }
+
+
+
+# ======================================
+# VARIANT ADMIN
+# ======================================
 
 
 @admin.register(ProductVariant)
 class ProductVariantAdmin(admin.ModelAdmin):
+
+
     list_display = (
+
         "product",
+
         "size",
-        "color_display",
+
+        "color",
+
         "price",
-        "discount_percent",
+
         "final_price",
+
         "stock",
-        "is_active"
+
+        "is_active",
+
     )
 
-    list_filter = ("is_active", "color", "size")
-    search_fields = ("product__title", "sku")
-    readonly_fields = ("final_price",)
 
-    def color_display(self, obj):
-        return format_html(
-            '<span style="display:inline-block;width:20px;height:20px;background:{};border-radius:4px;"></span> {}',
-            obj.color.code,
-            obj.color.title
-        )
-    color_display.short_description = "رنگ"
+    list_filter = (
+
+        "is_active",
+
+        "color",
+
+        "size",
+
+    )
+
+
+    search_fields = (
+
+        "product__title",
+
+        "sku",
+
+    )
+
+
+
+# ======================================
+# IMAGE ADMIN
+# ======================================
+
+
+@admin.register(ProductImages)
+class ProductImageAdmin(admin.ModelAdmin):
+
+
+    list_display = (
+
+        "product",
+
+        "preview",
+
+        "is_main",
+
+    )
+
+
+    list_filter = (
+
+        "is_main",
+
+    )
+
+
+    def preview(self,obj):
+
+        if obj.image:
+
+            return format_html(
+
+                '<img src="{}" width="70">',
+
+                obj.image.url
+
+            )
+
+        return "-"
+
+
+
+# ======================================
+# SIMPLE MODELS
+# ======================================
+
+
+@admin.register(ProductSize)
+class ProductSizeAdmin(admin.ModelAdmin):
+
+    search_fields = (
+        "title",
+    )
 
 
 
 @admin.register(ProductColor)
 class ProductColorAdmin(admin.ModelAdmin):
-    list_display = ("title", "color_preview", "code")
-    search_fields = ("title", "code")
 
-    def color_preview(self, obj):
-        return format_html(
-            '<span style="display:inline-block;width:30px;height:20px;background:{};"></span>',
-            obj.code
-        )
-    color_preview.short_description = "نمایش رنگ"
+    list_display = (
 
+        "title",
 
+        "code",
 
-@admin.register(ProductSize)
-class ProductSizeAdmin(admin.ModelAdmin):
-    search_fields = ("title",)
+    )
+
 
 
 @admin.register(Feature)
 class FeatureAdmin(admin.ModelAdmin):
-    search_fields = ("title",)
 
+    search_fields = (
 
-@admin.register(ProductImages)
-class ProductImagesAdmin(admin.ModelAdmin):
-    list_display = ("product", "image_preview", "is_main", "created_date")
-    list_filter = ("is_main",)
-    readonly_fields = ("image_preview",)
+        "title",
 
-    def image_preview(self, obj):
-        if obj.image:
-            return format_html('<img src="{}" width="80" />', obj.image.url)
-        return "-"
-    image_preview.short_description = "پیش نمایش"
-
-
-
-@admin.register(FeatureValue)
-class FeatureValueAdmin(admin.ModelAdmin):
-    list_display = ("product", "feature", "value")
-    list_filter = ("feature",)
-    search_fields = ("product__title", "value")
+    )
