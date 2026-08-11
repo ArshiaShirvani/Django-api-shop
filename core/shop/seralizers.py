@@ -1,5 +1,5 @@
 from rest_framework import serializers
-
+from review.serializers import ReviewSerializer
 from .models import (
     Product,
     ProductCategory,
@@ -271,6 +271,11 @@ class ProductDetailSerializer(serializers.ModelSerializer):
         many=True,
         read_only=True
     )
+    
+    reviews = ReviewSerializer(
+        many=True,
+        read_only=True
+    )
 
     main_image = serializers.SerializerMethodField()
 
@@ -305,6 +310,8 @@ class ProductDetailSerializer(serializers.ModelSerializer):
             "variants",
 
             "feature_values",
+            
+            "reviews",
 
             "min_price",
 
