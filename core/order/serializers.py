@@ -6,11 +6,11 @@ from .models import (OrderModel,
                      UserAddressModel,
                      CouponModel,
                      )
-from shop.seralizers import ProductVariantSerilizer
+from shop.seralizers import ProductVariantSerializer
 from shop.models import ProductVariant
 from django.db import transaction
 from django.utils import timezone
-
+from django.db.models import F
 
 class CouponApplySerializer(serializers.ModelSerializer):
     code = serializers.CharField(max_length=10)
@@ -47,7 +47,7 @@ class UserAddressSerializer(serializers.ModelSerializer):
         
         
 class OrderItemSerializer(serializers.ModelSerializer):
-    variant = ProductVariantSerilizer(read_only=True)
+    variant = ProductVariantSerializer(read_only=True)
     
     class Meta:
         model = OrderItemsModel
