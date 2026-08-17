@@ -1,3 +1,10 @@
+from django.db.models import (
+    OuterRef,
+    Subquery,
+    IntegerField,
+    F,
+)
+
 from rest_framework.views import APIView
 from rest_framework.response import Response
 
@@ -5,38 +12,31 @@ from .models import (
     WebsiteSetting,
     HomeBanner,
     SecondaryBanner,
-    HomeCategory
+    HomeCategory,
+    ContactMessage,
 )
 
 from .serializers import (
     WebsiteSettingSerializer,
     HomeBannerSerializer,
     SecondaryBannerSerializer,
-    HomeCategorySerializer
+    HomeCategorySerializer,
+    ContactMessageSerializer
 )
-
 
 from shop.models import (
     Product,
-    ProductStatus
+    ProductStatus,
+    ProductVariant
 )
 
 from shop.seralizers import ProductListSerializer
-
-from django.db.models import (
-    OuterRef,
-    Subquery,
-    IntegerField
-)
-from django.db.models import Max
-from shop.models import ProductVariant
+from shop.views import ProductBaseMixin
 
 
-class HomeAPIView(APIView):
-
+class HomeAPIView(ProductBaseMixin, APIView):
 
     def get(self, request):
-
 
         # =========================
         # Website Settings
@@ -44,11 +44,9 @@ class HomeAPIView(APIView):
 
         setting = WebsiteSetting.objects.first()
 
-
         setting_data = None
 
         if setting:
-
             setting_data = WebsiteSettingSerializer(
                 setting,
                 context={
@@ -56,18 +54,13 @@ class HomeAPIView(APIView):
                 }
             ).data
 
-
-
         # =========================
         # Main Banners
         # =========================
 
         banners = HomeBanner.objects.filter(
             is_active=True
-        ).order_by(
-            "id"
-        )
-
+        ).order_by("id")
 
         banners_data = HomeBannerSerializer(
             banners,
@@ -77,8 +70,6 @@ class HomeAPIView(APIView):
             }
         ).data
 
-
-
         # =========================
         # Secondary Banner
         # =========================
@@ -87,21 +78,15 @@ class HomeAPIView(APIView):
             is_active=True
         ).first()
 
-
         secondary_data = None
 
-
         if secondary_banner:
-
             secondary_data = SecondaryBannerSerializer(
                 secondary_banner,
                 context={
                     "request": request
                 }
             ).data
-
-
-
 
         # =========================
         # Home Categories
@@ -113,7 +98,6 @@ class HomeAPIView(APIView):
             "category"
         )
 
-
         categories_data = HomeCategorySerializer(
             categories,
             many=True,
@@ -122,26 +106,20 @@ class HomeAPIView(APIView):
             }
         ).data
 
-
-
-
         # =========================
         # Discount Products
         # =========================
 
-        discount_products = Product.objects.filter(
-            status=ProductStatus.PUBLISHED,
-            variants__is_active=True,
-            variants__stock__gt=0,
-            variants__discount_percent__gt=0
-        ).annotate(
-            best_variant_discount=Max(
-                "variants__discount_percent"
+        discount_products = (
+            self.get_queryset()
+            .filter(
+                best_variant_discount__gt=0
             )
-        ).order_by(
-            "-best_variant_discount"
-        ).distinct()[:4]
-        
+            .order_by(
+                "-best_variant_discount"
+            )[:4]
+        )
+
         discount_products_data = ProductListSerializer(
             discount_products,
             many=True,
@@ -150,8 +128,9 @@ class HomeAPIView(APIView):
             }
         ).data
 
-
-
+        # =========================
+        # Response
+        # =========================
 
         return Response({
 
@@ -166,3 +145,34 @@ class HomeAPIView(APIView):
             "discount_products": discount_products_data
 
         })
+        
+# ==========================================
+# CONTACT MESSAGE API
+# ==========================================
+
+class ContactMessageAPIView(APIView):
+
+    def post(self, request):
+
+        serializer = ContactMessageSerializer(
+            data=request.data
+        )
+
+        if serializer.is_valid():
+
+            contact_message = serializer.save()
+
+            return Response(
+                {
+                    "message": "پیام شما با موفقیت ارسال شد.",
+                    "data": ContactMessageSerializer(
+                        contact_message
+                    ).data
+                },
+                status=201
+            )
+
+        return Response(
+            serializer.errors,
+            status=400
+        )
