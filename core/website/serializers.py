@@ -4,7 +4,8 @@ from .models import (
     WebsiteSetting,
     HomeBanner,
     SecondaryBanner,
-    HomeCategory
+    HomeCategory,
+    ContactMessage,
 )
 
 
@@ -196,3 +197,29 @@ class HomeCategorySerializer(serializers.ModelSerializer):
 
 
         return None
+
+
+# ==========================================
+# CONTACT MESSAGE
+# ==========================================
+
+class ContactMessageSerializer(serializers.ModelSerializer):
+
+    class Meta:
+
+        model = ContactMessage
+
+        fields = (
+            "id",
+            "name",
+            "subject",
+            "phone",
+            "email",
+            "message",
+            "created_date",
+        )
+
+        read_only_fields = (
+            "id",
+            "created_date",
+        )
