@@ -26,11 +26,13 @@ from drf_spectacular.views import (
 
 urlpatterns = [
     path('admin/', admin.site.urls),
+    path('', include('website.urls')),
     path('accounts/', include('accounts.urls')),
     path('shop/', include('shop.urls')),
     path('cart/', include('cart.urls')),
     path('order/', include('order.urls')),
     path('payment/', include('payment.urls')),
+    path('review/', include('review.urls')),
     
     
     path('api/schema/', SpectacularAPIView.as_view(), name='schema'),
