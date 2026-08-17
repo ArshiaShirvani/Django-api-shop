@@ -22,7 +22,7 @@ from .models import (
     ProductStatus,
     FeatureValue
 )
-
+from review.models import Review
 from .seralizers import (
     ProductListSerializer,
     ProductDetailSerializer,
@@ -392,7 +392,15 @@ class ProductDetailApiView(ProductBaseMixin, APIView):
 
                     )
 
-                )
+                ),
+                Prefetch(
+                    "reviews",
+                    queryset=Review.objects.select_related(
+                        "user"
+                    ).order_by(
+                        "-created_date"
+                    )
+                ),
 
             ),
 
