@@ -391,3 +391,53 @@ class HomeCategory(models.Model):
 
         verbose_name = "دسته صفحه اصلی"
         verbose_name_plural = "دسته های صفحه اصلی"
+        
+        
+from django.db import models
+
+
+# ==========================================
+# CONTACT MODEL
+# ==========================================
+
+class ContactMessage(models.Model):
+
+    name = models.CharField(
+        max_length=100
+    )
+
+    subject = models.CharField(
+        max_length=200
+    )
+
+    phone = models.CharField(
+        max_length=20
+    )
+
+    email = models.EmailField(
+        blank=True,
+        null=True
+    )
+
+    message = models.TextField()
+
+    seen = models.BooleanField(
+        default=False
+    )
+
+    created_date = models.DateTimeField(
+        auto_now_add=True
+    )
+
+    class Meta:
+
+        ordering = [
+            "-created_date"
+        ]
+
+        verbose_name = "تیکت تماس با ما"
+
+        verbose_name_plural = "تیکت تماس با ما"
+
+    def __str__(self):
+        return f"{self.name} - {self.subject}"
