@@ -6,8 +6,8 @@ from .models import (
     HomeBanner,
     SecondaryBanner,
     HomeCategory,
+    ContactMessage,
 )
-
 
 
 # ==================================
@@ -425,3 +425,195 @@ class HomeCategoryAdmin(admin.ModelAdmin):
 
 
     preview.short_description = "تصویر"
+
+
+# ==========================================
+# CONTACT MESSAGE ADMIN
+# ==========================================
+
+@admin.register(ContactMessage)
+class ContactMessageAdmin(admin.ModelAdmin):
+
+    # --------------------------------------
+    # LIST DISPLAY
+    # --------------------------------------
+
+    list_display = (
+        "name",
+        "subject",
+        "phone",
+        "email",
+        "seen_status",
+        "created_date",
+    )
+
+    # --------------------------------------
+    # LIST FILTER
+    # --------------------------------------
+
+    list_filter = (
+        "seen",
+        "created_date",
+    )
+
+    # --------------------------------------
+    # SEARCH
+    # --------------------------------------
+
+    search_fields = (
+        "name",
+        "subject",
+        "phone",
+        "email",
+        "message",
+    )
+
+    # --------------------------------------
+    # DATE HIERARCHY
+    # --------------------------------------
+
+    date_hierarchy = "created_date"
+
+    # --------------------------------------
+    # DEFAULT ORDER
+    # --------------------------------------
+
+    ordering = (
+        "seen",
+        "-created_date",
+    )
+
+    # --------------------------------------
+    # READ ONLY
+    # --------------------------------------
+
+    readonly_fields = (
+        "created_date",
+    )
+
+    # --------------------------------------
+    # ITEMS PER PAGE
+    # --------------------------------------
+
+    list_per_page = 25
+
+    # --------------------------------------
+    # CLICKABLE ROW
+    # --------------------------------------
+
+    list_display_links = (
+        "name",
+        "subject",
+    )
+
+    # --------------------------------------
+    # FORM LAYOUT
+    # --------------------------------------
+
+    fieldsets = (
+
+        (
+            "اطلاعات تماس",
+            {
+                "fields": (
+                    "name",
+                    "phone",
+                    "email",
+                )
+            }
+        ),
+
+        (
+            "پیام",
+            {
+                "fields": (
+                    "subject",
+                    "message",
+                )
+            }
+        ),
+
+        (
+            "وضعیت",
+            {
+                "fields": (
+                    "seen",
+                    "created_date",
+                )
+            }
+        ),
+
+    )
+
+    # --------------------------------------
+    # SEEN STATUS
+    # --------------------------------------
+
+    @admin.display(
+        description="وضعیت",
+        ordering="seen"
+    )
+    def seen_status(self, obj):
+
+        if obj.seen:
+
+            return format_html(
+                '<span style="'
+                'background:#dcfce7;'
+                'color:#166534;'
+                'padding:5px 10px;'
+                'border-radius:8px;'
+                'font-weight:600;'
+                '">'
+                '✓ خوانده شده'
+                '</span>'
+            )
+
+        return format_html(
+            '<span style="'
+            'background:#fee2e2;'
+            'color:#991b1b;'
+            'padding:5px 10px;'
+            'border-radius:8px;'
+            'font-weight:600;'
+            '">'
+            '● خوانده نشده'
+            '</span>'
+        )
+
+    # --------------------------------------
+    # ACTIONS
+    # --------------------------------------
+
+    actions = (
+        "mark_as_seen",
+        "mark_as_unseen",
+    )
+
+    @admin.action(
+        description="علامت‌گذاری پیام‌های انتخاب‌شده به عنوان خوانده‌شده"
+    )
+    def mark_as_seen(self, request, queryset):
+
+        updated = queryset.update(
+            seen=True
+        )
+
+        self.message_user(
+            request,
+            f"{updated} پیام به عنوان خوانده‌شده علامت‌گذاری شد."
+        )
+
+    @admin.action(
+        description="علامت‌گذاری پیام‌های انتخاب‌شده به عنوان خوانده‌نشده"
+    )
+    def mark_as_unseen(self, request, queryset):
+
+        updated = queryset.update(
+            seen=False
+        )
+
+        self.message_user(
+            request,
+            f"{updated} پیام به عنوان خوانده‌نشده علامت‌گذاری شد."
+        )
