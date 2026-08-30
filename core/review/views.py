@@ -3,6 +3,11 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 
 from .models import Review
 from .serializers import ReviewSerializer
+from django.shortcuts import get_object_or_404
+
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status
 
 
 class ReviewListCreateView(generics.ListCreateAPIView):
@@ -33,3 +38,21 @@ class ReviewUpdateView(generics.UpdateAPIView):
         return Review.objects.filter(
             user=self.request.user
         ).select_related("user", "product")
+        
+        
+class ReviewDeleteAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def delete(self, request, pk):
+
+        review = get_object_or_404(
+            Review,
+            pk=pk,
+            user=request.user
+        )
+
+        review.delete()
+
+        return Response(
+            status=status.HTTP_204_NO_CONTENT
+        )
