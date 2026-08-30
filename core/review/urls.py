@@ -3,6 +3,7 @@ from django.urls import path
 from .views import (
     ReviewListCreateView,
     ReviewUpdateView,
+    ReviewDeleteAPIView,
 )
 
 app_name = "review"
@@ -18,5 +19,10 @@ urlpatterns = [
         "<int:pk>/update/",
         ReviewUpdateView.as_view(),
         name="review-update",
+    ),
+    path(
+        "<int:pk>/delete/",
+        ReviewDeleteAPIView.as_view(),
+        name="review-delete"
     ),
 ]
