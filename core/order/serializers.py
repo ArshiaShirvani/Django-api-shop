@@ -1,180 +1,508 @@
 from rest_framework import serializers
-from .models import (OrderModel,
-                     OrderItemsModel,
-                     OrderStatusType,
-                     ShippingMethodType,
-                     UserAddressModel,
-                     CouponModel,
-                     )
-from shop.seralizers import ProductVariantSerializer
-from shop.models import ProductVariant
-from django.db import transaction
-from django.utils import timezone
-from django.db.models import F
 
-class CouponApplySerializer(serializers.ModelSerializer):
-    code = serializers.CharField(max_length=10)
-    
-    def validate(self, attrs):
-        user = self.context["request"].user
-        code = attrs["code"]
-        try:
-            coupon = CouponModel.objects.filter(code=code,is_active=True)
-        except CouponModel.DoesNotExist:
-            raise serializers.ValidationError["کد تخفیف معتبر نیست"]
-        
-        if coupon.expiration_date < timezone.now():
-            raise serializers.ValidationError("کد تخفیف منقضی شده است")
-        if coupon.allowed_users.exists() and user not in coupon.allowed_users.all():
-            raise serializers.ValidationError("شما مجاز به استفاده از این کد تخفیف نیستید")
-        if user in coupon.used_by.all():
-            raise serializers.ValidationError("این تخفیف قبلا استفاده شده است")
-        
-        
-class UserAddressSerializer(serializers.ModelSerializer):
+from .models import (
+    Address,
+    ShippingMethod,
+    Coupon,
+    Order,
+    OrderItem,
+)
+
+
+# =========================================================
+# Address
+# =========================================================
+
+class AddressSerializer(serializers.ModelSerializer):
+
     class Meta:
-        model = UserAddressModel
-        fields = [
-            "user",
-            "email",
-            "address",
-            "state",
-            "city",
-            "zip_code",
-            "plate",
-        ]
-        read_only_fields = ["id","user","email"]
-        
-        
-class OrderItemSerializer(serializers.ModelSerializer):
-    variant = ProductVariantSerializer(read_only=True)
-    
-    class Meta:
-        model = OrderItemsModel
+        model = Address
+
         fields = [
             "id",
-            "order",
-            "variant",
-            "quantity",
-            "price",
+            "title",
+            "recipient_name",
+            "recipient_phone",
+            "province",
+            "city",
+            "address",
+            "postal_code",
+            "plaque",
+            "unit",
+            "is_default",
+            "created_date",
+            "updated_date",
         ]
-        
-        
-class OrderCreateItemSerializer(serializers.Serializer):
-    variant_id = serializers.IntegerField()
-    quantity = serializers.IntegerField(min_value=1)
-    
 
-class OrderCreateSerializer(serializers.ModelSerializer):
-    items = OrderCreateItemSerializer(many=True)
-    coupon_code = serializers.CharField(required=False, allow_null=True, allow_blank=True)
+        read_only_fields = [
+            "id",
+            "created_date",
+            "updated_date",
+        ]
 
-    class Meta:
-        model = OrderModel
-        fields = ["id", "address", "shipping_method", "coupon_code", "items"]
-        read_only_fields = ["id"]
+    def validate_recipient_phone(self, value):
+
+        value = value.strip()
+
+        if not value.isdigit():
+            raise serializers.ValidationError(
+                "شماره تماس فقط باید شامل عدد باشد."
+            )
+
+        if len(value) != 11:
+            raise serializers.ValidationError(
+                "شماره تماس باید ۱۱ رقم باشد."
+            )
+
+        if not value.startswith("09"):
+            raise serializers.ValidationError(
+                "شماره تماس معتبر نیست."
+            )
+
+        return value
+
+    def validate_postal_code(self, value):
+
+        value = value.strip()
+
+        if not value.isdigit():
+            raise serializers.ValidationError(
+                "کد پستی فقط باید شامل عدد باشد."
+            )
+
+        if len(value) != 10:
+            raise serializers.ValidationError(
+                "کد پستی باید ۱۰ رقم باشد."
+            )
+
+        return value
 
     def validate(self, attrs):
-        user = self.context["request"].user
-        address = attrs["address"]
 
-        if address.user != user:
-            raise serializers.ValidationError("آدرس متعلق به کاربر نیست")
+        if self.instance is None:
+
+            required_fields = [
+                "title",
+                "recipient_name",
+                "recipient_phone",
+                "province",
+                "city",
+                "address",
+                "postal_code",
+            ]
+
+            for field in required_fields:
+
+                value = attrs.get(field)
+
+                if value is None or not str(value).strip():
+
+                    raise serializers.ValidationError({
+                        field: "این فیلد الزامی است."
+                    })
 
         return attrs
 
-    def create(self, validated_data):
-        user = self.context["request"].user
-        items_data = validated_data.pop("items")
-        coupon_code = validated_data.pop("coupon_code", None)
 
-        coupon = None
-        discount_percent = 0
+# =========================================================
+# Shipping Method
+# =========================================================
 
-        
-        if coupon_code:
-            coupon_serializer = CouponApplySerializer(
-                data={"code": coupon_code},
-                context=self.context
-            )
-            coupon_serializer.is_valid(raise_exception=True)
-            coupon = coupon_serializer.validated_data["coupon"]
-            discount_percent = coupon.discount_percent
+class ShippingMethodSerializer(
+    serializers.ModelSerializer
+):
 
-        with transaction.atomic():
+    calculated_cost = serializers.SerializerMethodField()
 
-            order = OrderModel.objects.create(
-                user=user,
-                coupon=coupon,
-                **validated_data
-            )
-
-            total_price = 0
-
-            for item in items_data:
-                variant = ProductVariant.objects.select_for_update().get(
-                    id=item["variant_id"],
-                    is_active=True
-                )
-
-                quantity = item["quantity"]
-
-                
-                if variant.stock < quantity:
-                    raise serializers.ValidationError(
-                        f"موجودی برای {variant} کافی نیست"
-                    )
-
-                price = variant.final_price
-
-                OrderItemsModel.objects.create(
-                    order=order,
-                    variant=variant,
-                    quantity=quantity,
-                    price=price
-                )
-
-                
-                variant.stock = F("stock") - quantity
-                variant.save(update_fields=["stock"])
-
-                total_price += price * quantity
-
-            
-            if discount_percent:
-                total_price = total_price - (total_price * discount_percent // 100)
-
-                coupon.used_by.add(user)
-
-                
-                if hasattr(coupon, "usage_limit") and coupon.usage_limit == 1:
-                    coupon.is_active = False
-                    coupon.save(update_fields=["is_active"])
-
-            order.total_price = total_price
-            order.save(update_fields=["total_price"])
-
-        return order
-
-    
-    
-class OrderDetailSerializer(serializers.ModelSerializer):
-    order_items = OrderItemSerializer(many=True,read_only=True)
-    address = UserAddressSerializer(read_only=True)
-    status_display = serializers.CharField(source="get_status_display", read_only=True)
-    shipping_display = serializers.CharField(source="get_shipping_method_display", read_only=True)
-    
     class Meta:
-        model = OrderModel
+        model = ShippingMethod
+
         fields = [
             "id",
-            "address",
-            "total_price",
-            "tax_percent",
-            "shipping_method",
-            "shipping_display",
+            "title",
+            "code",
+            "description",
+            "base_cost",
+            "free_shipping_minimum",
+            "calculated_cost",
+            "display_order",
+        ]
+
+        read_only_fields = [
+            "id",
+            "calculated_cost",
+        ]
+
+    def get_calculated_cost(self, obj):
+
+        subtotal = self.context.get(
+            "subtotal",
+            0,
+        )
+
+        return obj.calculate_cost(
+            subtotal
+        )
+
+
+# =========================================================
+# Order Shipping Method
+# =========================================================
+
+class OrderShippingMethodSerializer(
+    serializers.ModelSerializer
+):
+
+    cost = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ShippingMethod
+
+        fields = [
+            "id",
+            "title",
+            "code",
+            "description",
+            "cost",
+        ]
+
+        read_only_fields = fields
+
+    def get_cost(self, obj):
+
+        order = self.context.get(
+            "order"
+        )
+
+        if not order:
+            return 0
+
+        return order.shipping_cost
+
+
+# =========================================================
+# Coupon Apply
+# =========================================================
+
+class CouponApplySerializer(
+    serializers.Serializer
+):
+
+    code = serializers.CharField(
+        max_length=50,
+        trim_whitespace=True,
+    )
+
+    def validate_code(self, value):
+
+        value = value.strip().upper()
+
+        if not value:
+            raise serializers.ValidationError(
+                "کد تخفیف را وارد کنید."
+            )
+
+        return value
+
+
+# =========================================================
+# Order Item
+# =========================================================
+
+class OrderItemSerializer(
+    serializers.ModelSerializer
+):
+
+    product_id = serializers.IntegerField(
+        source="variant.product.id",
+        read_only=True,
+    )
+
+    product_slug = serializers.CharField(
+        source="variant.product.slug",
+        read_only=True,
+    )
+
+    image = serializers.SerializerMethodField()
+
+    line_total = serializers.IntegerField(
+        source="subtotal",
+        read_only=True,
+    )
+
+    class Meta:
+        model = OrderItem
+
+        fields = [
+            "id",
+
+            # Product
+            "product_id",
+            "product_slug",
+            "product_title",
+            "image",
+
+            # Variant
+            "sku",
+            "size",
+            "color",
+            "color_code",
+
+            # Price
+            "original_unit_price",
+            "discount_percent",
+            "unit_price",
+
+            # Quantity
+            "quantity",
+
+            # Total
+            "subtotal",
+            "line_total",
+
+            "created_date",
+        ]
+
+        read_only_fields = fields
+
+    def get_image(self, obj):
+
+        product = obj.variant.product
+
+        image = (
+            product.images
+            .filter(
+                is_main=True
+            )
+            .first()
+        )
+
+        if not image:
+
+            image = (
+                product.images
+                .order_by("id")
+                .first()
+            )
+
+        if not image:
+            return None
+
+        request = self.context.get(
+            "request"
+        )
+
+        if request:
+
+            return request.build_absolute_uri(
+                image.image.url
+            )
+
+        return image.image.url
+
+
+# =========================================================
+# Order List
+# =========================================================
+
+class OrderListSerializer(
+    serializers.ModelSerializer
+):
+
+    status_display = serializers.CharField(
+        source="get_status_display",
+        read_only=True,
+    )
+
+    items_count = serializers.IntegerField(
+        read_only=True,
+    )
+
+    shipping_method_title = serializers.CharField(
+        source="shipping_title",
+        read_only=True,
+    )
+
+    class Meta:
+        model = Order
+
+        fields = [
+            "id",
+            "order_number",
+
             "status",
             "status_display",
-            "order_items",
-            "created_date"
+
+            "items_count",
+
+            "subtotal",
+            "discount_amount",
+            "shipping_cost",
+            "total_price",
+
+            "coupon_code",
+
+            "shipping_method_title",
+
+            "created_date",
+            "paid_at",
+            "shipped_at",
+            "delivered_at",
+            "cancelled_at",
         ]
+
+        read_only_fields = fields
+
+
+# =========================================================
+# Order Detail
+# =========================================================
+
+class OrderDetailSerializer(
+    serializers.ModelSerializer
+):
+
+    status_display = serializers.CharField(
+        source="get_status_display",
+        read_only=True,
+    )
+
+    items = OrderItemSerializer(
+        many=True,
+        read_only=True,
+    )
+
+    shipping_method = serializers.SerializerMethodField()
+
+    is_paid = serializers.BooleanField(
+        read_only=True,
+    )
+
+    is_cancelled = serializers.BooleanField(
+        read_only=True,
+    )
+
+    class Meta:
+        model = Order
+
+        fields = [
+
+            # Basic
+            "id",
+            "order_number",
+
+            "status",
+            "status_display",
+
+            "is_paid",
+            "is_cancelled",
+
+            # Items
+            "items",
+
+            # Coupon
+            "coupon_code",
+            "coupon_discount",
+
+            # Shipping
+            "shipping_method",
+            "shipping_title",
+            "shipping_cost",
+
+            "tracking_code",
+
+            # Address
+            "recipient_name",
+            "recipient_phone",
+
+            "province",
+            "city",
+            "address",
+            "postal_code",
+
+            "plaque",
+            "unit",
+
+            # Price
+            "subtotal",
+            "discount_amount",
+            "total_price",
+
+            # Payment
+            "payment_reference",
+
+            # Dates
+            "paid_at",
+            "shipped_at",
+            "delivered_at",
+            "cancelled_at",
+
+            "created_date",
+            "updated_date",
+        ]
+
+        read_only_fields = fields
+
+    def get_shipping_method(self, obj):
+
+        if not obj.shipping_method:
+            return None
+
+        return {
+            "id": obj.shipping_method.id,
+            "title": obj.shipping_method.title,
+            "code": obj.shipping_method.code,
+            "description": obj.shipping_method.description,
+            "cost": obj.shipping_cost,
+        }
+
+
+# =========================================================
+# Create Order
+# =========================================================
+
+class CreateOrderSerializer(
+    serializers.Serializer
+):
+
+    address_id = serializers.IntegerField(
+        min_value=1
+    )
+
+    shipping_method_id = serializers.IntegerField(
+        min_value=1
+    )
+
+    coupon_code = serializers.CharField(
+        max_length=50,
+        required=False,
+        allow_blank=True,
+        allow_null=True,
+    )
+
+    def validate_coupon_code(self, value):
+
+        if not value:
+            return None
+
+        return value.strip().upper()
+
+    def validate(self, attrs):
+
+        request = self.context.get(
+            "request"
+        )
+
+        if not request:
+
+            raise serializers.ValidationError(
+                "درخواست نامعتبر است."
+            )
+
+        if not request.user.is_authenticated:
+
+            raise serializers.ValidationError(
+                "برای ثبت سفارش باید وارد حساب کاربری شوید."
+            )
+
+        return attrs
