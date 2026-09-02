@@ -122,6 +122,11 @@ class CartItemSerializer(serializers.ModelSerializer):
         source="variant.product.title",
         read_only=True,
     )
+    
+    product_slug = serializers.CharField(
+        source="variant.product.slug",
+        read_only=True
+    )
 
     product_id = serializers.IntegerField(
         source="variant.product.id",
@@ -177,6 +182,7 @@ class CartItemSerializer(serializers.ModelSerializer):
             "variant",
             "product_id",
             "product_title",
+            "product_slug",
             "image",
             "size",
             "color",

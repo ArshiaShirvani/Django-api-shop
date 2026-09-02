@@ -12,7 +12,7 @@ from .serializers import (
     AddCartItemSerializer,
     UpdateCartItemSerializer,
 )
-
+from drf_spectacular.utils import extend_schema
 
 class CartBaseAPIView(APIView):
     permission_classes = [IsAuthenticated]
@@ -58,6 +58,9 @@ class CartDetailAPIView(CartBaseAPIView):
 
 class CartAddItemAPIView(CartBaseAPIView):
 
+    @extend_schema(
+    request=AddCartItemSerializer,
+    )
     @transaction.atomic
     def post(self, request):
         cart = (
