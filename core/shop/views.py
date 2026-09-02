@@ -20,7 +20,8 @@ from .models import (
     ProductImages,
     ProductSize,
     ProductStatus,
-    FeatureValue
+    FeatureValue,
+    SizeGuide,
 )
 from review.models import Review
 from .seralizers import (
@@ -400,6 +401,10 @@ class ProductDetailApiView(ProductBaseMixin, APIView):
                     ).order_by(
                         "-created_date"
                     )
+                ),
+                Prefetch(
+                    "size_guides",
+                    queryset=SizeGuide.objects.all()
                 ),
 
             ),

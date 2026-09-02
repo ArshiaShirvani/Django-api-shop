@@ -498,3 +498,41 @@ class FeatureValue(models.Model):
     def __str__(self):
 
         return f"{self.product.title} - {self.feature.title}"
+    
+    
+class SizeGuide(models.Model):
+
+    product = models.ForeignKey(
+        Product,
+        on_delete=models.CASCADE,
+        related_name="size_guides",
+        verbose_name="محصول"
+    )
+
+    feature = models.CharField(
+        max_length=255,
+        verbose_name="ویژگی",
+        blank=True,
+        null=True,
+    )
+
+    value = models.CharField(
+        max_length=255,
+        verbose_name="مقدار",
+        blank=True,
+        null=True,
+    )
+
+    image = models.ImageField(
+        upload_to="shop/size_guides/",
+        null=True,
+        blank=True,
+        verbose_name="تصویر"
+    )
+
+    class Meta:
+        verbose_name = "راهنمای سایز"
+        verbose_name_plural = "راهنمای سایز"
+
+    def __str__(self):
+        return f"{self.product.title} - {self.feature}"

@@ -8,7 +8,8 @@ from .models import (
     ProductImages,
     ProductVariant,
     Feature,
-    FeatureValue
+    FeatureValue,
+    SizeGuide,
 )
 
 
@@ -216,6 +217,8 @@ class ProductListSerializer(serializers.ModelSerializer):
             "has_discount",
 
             "main_image",
+            
+            
 
             "created_date",
 
@@ -244,6 +247,21 @@ class ProductListSerializer(serializers.ModelSerializer):
             and
             obj.best_variant_discount > 0
         )
+       
+# ===========================================
+# PRODUCT SIZE GUIDE
+# ===========================================        
+
+class SizeGuideSerializer(serializers.ModelSerializer):
+
+    class Meta:
+        model = SizeGuide
+        fields = [
+            "id",
+            "feature",
+            "value",
+            "image",
+        ]
 
 
 # ===========================================
@@ -251,6 +269,11 @@ class ProductListSerializer(serializers.ModelSerializer):
 # ===========================================
 
 class ProductDetailSerializer(serializers.ModelSerializer):
+    
+    size_guides = SizeGuideSerializer(
+        many=True,
+        read_only=True
+    )
 
     categories = CategorySimpleSerializer(
         many=True,
@@ -311,6 +334,8 @@ class ProductDetailSerializer(serializers.ModelSerializer):
 
             "feature_values",
             
+            "size_guides",
+            
             "reviews",
 
             "min_price",
@@ -340,3 +365,5 @@ class ProductDetailSerializer(serializers.ModelSerializer):
             return image.image.url
 
         return None
+    
+
