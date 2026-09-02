@@ -73,6 +73,7 @@ class HomeBannerSerializer(serializers.ModelSerializer):
             "id",
             "title",
             "image",
+            "phone_bannner",
             "link",
             "is_first",
         ]

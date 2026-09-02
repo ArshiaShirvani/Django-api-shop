@@ -113,6 +113,13 @@ class HomeBanner(models.Model):
         blank=True,
         verbose_name="لینک"
     )
+    
+    phone_bannner = models.ImageField(
+        upload_to="website/banners/mobile/",
+        verbose_name="تصویر برای موبایل",
+        blank=True,
+        null=True,
+    )
 
 
     is_active = models.BooleanField(
