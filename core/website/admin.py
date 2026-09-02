@@ -170,6 +170,7 @@ class HomeBannerAdmin(admin.ModelAdmin):
                 "fields": (
                     "title",
                     "image",
+                    "phone_bannner",
                     "preview",
                     "link",
                 )
