@@ -10,8 +10,26 @@ from .models import (
     ProductColor,
     Feature,
     FeatureValue,
+    SizeGuide,
 )
 
+
+# ======================================
+# SIZE GUIDE INLINE
+# ======================================
+class SizeGuideInline(admin.TabularInline):
+
+    model = SizeGuide
+
+    extra = 1
+
+    fields = [
+        "feature",
+        "value",
+        "image",
+    ]
+
+    show_change_link = True
 
 # ======================================
 # IMAGE INLINE
@@ -191,6 +209,8 @@ class ProductAdmin(admin.ModelAdmin):
         ProductVariantInline,
 
         FeatureValueInline,
+        
+        SizeGuideInline,
 
     )
 
@@ -385,3 +405,4 @@ class FeatureAdmin(admin.ModelAdmin):
         "title",
 
     )
+    
