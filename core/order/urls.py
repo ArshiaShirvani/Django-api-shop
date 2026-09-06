@@ -1,6 +1,14 @@
 from django.urls import path
 
-from . import views
+from .views import (
+    AddressListCreateAPIView,
+    AddressDetailAPIView,
+    ShippingMethodListAPIView,
+    CouponApplyAPIView,
+    OrderCreateAPIView,
+    MyOrderListAPIView,
+    MyOrderDetailAPIView,
+)
 
 
 app_name = "order"
@@ -9,78 +17,68 @@ app_name = "order"
 urlpatterns = [
 
     # =====================================================
-    # Addresses
+    # ADDRESSES
     # =====================================================
 
     path(
         "addresses/",
-        views.AddressListCreateAPIView.as_view(),
+        AddressListCreateAPIView.as_view(),
         name="address-list-create",
     ),
 
     path(
         "addresses/<int:pk>/",
-        views.AddressDetailAPIView.as_view(),
+        AddressDetailAPIView.as_view(),
         name="address-detail",
     ),
 
+
     # =====================================================
-    # Shipping Methods
+    # SHIPPING METHODS
     # =====================================================
 
     path(
         "shipping-methods/",
-        views.ShippingMethodListAPIView.as_view(),
+        ShippingMethodListAPIView.as_view(),
         name="shipping-method-list",
     ),
 
+
     # =====================================================
-    # Coupon
+    # COUPON
     # =====================================================
 
     path(
-        "coupon/validate/",
-        views.CouponApplyAPIView.as_view(),
-        name="coupon-validate",
+        "apply-coupon/",
+        CouponApplyAPIView.as_view(),
+        name="apply-coupon",
     ),
 
+
     # =====================================================
-    # Create Order
+    # CREATE ORDER
     # =====================================================
 
     path(
         "create/",
-        views.OrderCreateAPIView.as_view(),
+        OrderCreateAPIView.as_view(),
         name="order-create",
     ),
 
+
     # =====================================================
-    # My Orders
+    # MY ORDERS
     # =====================================================
 
     path(
-        "",
-        views.MyOrdersAPIView.as_view(),
-        name="order-list",
+        "my-orders/",
+        MyOrderListAPIView.as_view(),
+        name="my-order-list",
     ),
 
-    # =====================================================
-    # Order Detail
-    # =====================================================
-
     path(
-        "<str:order_number>/",
-        views.OrderDetailAPIView.as_view(),
-        name="order-detail",
-    ),
-
-    # =====================================================
-    # Cancel Order
-    # =====================================================
-
-    path(
-        "<str:order_number>/cancel/",
-        views.OrderCancelAPIView.as_view(),
-        name="order-cancel",
+        "my-orders/<int:pk>/",
+        MyOrderDetailAPIView.as_view(),
+        name="my-order-detail",
     ),
 ]
