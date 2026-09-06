@@ -1,8 +1,9 @@
-from django.db import transaction
-from django.shortcuts import get_object_or_404
-from django.utils import timezone
+import uuid
 
-from cart.models import Cart, CartItem
+from django.core.exceptions import ValidationError
+from django.db import transaction
+
+from cart.models import Cart
 from shop.models import ProductVariant
 
 from .models import (
@@ -12,412 +13,475 @@ from .models import (
     CouponUsage,
     Order,
     OrderItem,
+    OrderStatus,
 )
 
 
 class OrderService:
 
-    # =========================================================
-    # Profile
-    # =========================================================
-
-    @staticmethod
-    def validate_profile(user):
-        """
-        بررسی کامل بودن اطلاعات پروفایل قبل از ورود به Order.
-        """
-
-        profile = getattr(user, "profile", None)
-
-        if profile is None:
-            raise ValueError(
-                "پروفایل شما ایجاد نشده است. ابتدا پروفایل خود را تکمیل کنید."
-            )
-
-        if not profile.first_name:
-            raise ValueError(
-                "نام شما تکمیل نشده است. ابتدا پروفایل خود را تکمیل کنید."
-            )
-
-        if not profile.last_name:
-            raise ValueError(
-                "نام خانوادگی شما تکمیل نشده است. ابتدا پروفایل خود را تکمیل کنید."
-            )
-
-        if not user.phone_number:
-            raise ValueError(
-                "شماره تلفن شما ثبت نشده است."
-            )
-
-        return profile
+    TAX_PERCENT = 10
 
     # =========================================================
-    # Cart
-    # =========================================================
-
-    @staticmethod
-    def get_user_cart(user):
-        """
-        دریافت سبد خرید کاربر.
-        """
-
-        cart, _ = Cart.objects.get_or_create(
-            user=user
-        )
-
-        return cart
-
-    # =========================================================
-    # Cart Validation
-    # =========================================================
-
-    @staticmethod
-    def validate_cart_items(cart):
-        """
-        بررسی می‌کند تمام آیتم‌های سبد هنوز معتبر و دارای موجودی باشند.
-        """
-
-        items = (
-            CartItem.objects
-            .select_related(
-                "variant",
-                "variant__product",
-                "variant__size",
-                "variant__color",
-            )
-            .filter(
-                cart=cart
-            )
-        )
-
-        if not items.exists():
-            raise ValueError(
-                "سبد خرید شما خالی است."
-            )
-
-        for item in items:
-
-            variant = item.variant
-
-            if not variant.is_active:
-                raise ValueError(
-                    f"محصول «{variant.product.title}» دیگر فعال نیست."
-                )
-
-            if variant.stock <= 0:
-                raise ValueError(
-                    f"محصول «{variant.product.title}» موجود نیست."
-                )
-
-            if item.quantity > variant.stock:
-                raise ValueError(
-                    f"موجودی محصول «{variant.product.title}» کافی نیست. "
-                    f"حداکثر موجودی: {variant.stock}"
-                )
-
-        return items
-
-    # =========================================================
-    # Subtotal
-    # =========================================================
-
-    @staticmethod
-    def calculate_subtotal(cart):
-        """
-        محاسبه مبلغ کالاها با قیمت نهایی Variant.
-        """
-
-        items = (
-            CartItem.objects
-            .select_related(
-                "variant"
-            )
-            .filter(
-                cart=cart
-            )
-        )
-
-        subtotal = 0
-
-        for item in items:
-
-            subtotal += (
-                item.variant.final_price
-                * item.quantity
-            )
-
-        return subtotal
-
-    # =========================================================
-    # Coupon
-    # =========================================================
-
-    @staticmethod
-    def validate_coupon(
-        user,
-        code,
-        subtotal,
-    ):
-        """
-        فقط اعتبارسنجی کد تخفیف.
-        اینجا CouponUsage ایجاد نمی‌شود.
-
-        بنابراین اگر کاربر فقط کد را Apply کند
-        ولی پرداخت نکند، کد مصرف‌شده محسوب نمی‌شود.
-        """
-
-        if not code:
-            return None, 0
-
-        code = code.strip().upper()
-
-        try:
-
-            coupon = Coupon.objects.get(
-                code=code
-            )
-
-        except Coupon.DoesNotExist:
-
-            raise ValueError(
-                "کد تخفیف معتبر نیست."
-            )
-
-        now = timezone.now()
-
-        # -----------------------------------------------------
-        # Active
-        # -----------------------------------------------------
-
-        if not coupon.is_active:
-            raise ValueError(
-                "این کد تخفیف فعال نیست."
-            )
-
-        # -----------------------------------------------------
-        # Time
-        # -----------------------------------------------------
-
-        if now < coupon.start_date:
-            raise ValueError(
-                "زمان استفاده از این کد تخفیف هنوز شروع نشده است."
-            )
-
-        if now > coupon.end_date:
-            raise ValueError(
-                "زمان استفاده از این کد تخفیف به پایان رسیده است."
-            )
-
-        # -----------------------------------------------------
-        # Minimum Order
-        # -----------------------------------------------------
-
-        if subtotal < coupon.minimum_order_amount:
-            raise ValueError(
-                f"حداقل مبلغ سفارش برای استفاده از این کد "
-                f"{coupon.minimum_order_amount:,} تومان است."
-            )
-
-        # -----------------------------------------------------
-        # Total Usage Limit
-        # -----------------------------------------------------
-
-        if coupon.usage_limit is not None:
-
-            usage_count = CouponUsage.objects.filter(
-                coupon=coupon
-            ).count()
-
-            if usage_count >= coupon.usage_limit:
-                raise ValueError(
-                    "ظرفیت استفاده از این کد تخفیف تکمیل شده است."
-                )
-
-        # -----------------------------------------------------
-        # User Usage Limit
-        # -----------------------------------------------------
-
-        user_usage_count = CouponUsage.objects.filter(
-            coupon=coupon,
-            user=user,
-        ).count()
-
-        if user_usage_count >= coupon.usage_limit_per_user:
-            raise ValueError(
-                "شما قبلاً از این کد تخفیف استفاده کرده‌اید."
-            )
-
-        # -----------------------------------------------------
-        # Calculate
-        # -----------------------------------------------------
-
-        discount = coupon.calculate_discount(
-            subtotal
-        )
-
-        if discount <= 0:
-            raise ValueError(
-                "این کد تخفیف برای این سفارش قابل استفاده نیست."
-            )
-
-        return coupon, discount
-
-    # =========================================================
-    # Shipping
-    # =========================================================
-
-    @staticmethod
-    def get_shipping_method(shipping_method_id):
-
-        try:
-
-            shipping_method = (
-                ShippingMethod.objects.get(
-                    id=shipping_method_id,
-                    is_active=True,
-                )
-            )
-
-        except ShippingMethod.DoesNotExist:
-
-            raise ValueError(
-                "روش ارسال انتخاب‌شده معتبر نیست."
-            )
-
-        return shipping_method
-
-    # =========================================================
-    # Address
-    # =========================================================
-
-    @staticmethod
-    def get_user_address(
-        user,
-        address_id,
-    ):
-
-        try:
-
-            address = Address.objects.get(
-                id=address_id,
-                user=user,
-            )
-
-        except Address.DoesNotExist:
-
-            raise ValueError(
-                "آدرس انتخاب‌شده معتبر نیست."
-            )
-
-        return address
-
-    # =========================================================
-    # Order Number
-    # =========================================================
-
-    @staticmethod
-    def generate_order_number():
-        """
-        تولید شماره سفارش یکتا.
-        """
-
-        import uuid
-
-        while True:
-
-            order_number = (
-                timezone.now().strftime("%Y%m%d")
-                + "-"
-                + uuid.uuid4().hex[:12].upper()
-            )
-
-            if not Order.objects.filter(
-                order_number=order_number
-            ).exists():
-
-                return order_number
-
-    # =========================================================
-    # Create Order
+    # CREATE ORDER
     # =========================================================
 
     @staticmethod
     @transaction.atomic
     def create_order(
+        *,
         user,
-        address_id,
-        shipping_method_id,
-        coupon_code=None,
+        address,
+        shipping_method,
+        coupon=None,
     ):
         """
-        ساخت سفارش به صورت Transactional.
+        ساخت سفارش از روی سبد خرید.
+
+        این متد:
+        - Cart را بررسی می‌کند
+        - موجودی را بررسی می‌کند
+        - قیمت‌ها را Snapshot می‌کند
+        - تخفیف را محاسبه می‌کند
+        - مالیات را محاسبه می‌کند
+        - هزینه ارسال را محاسبه می‌کند
+        - Order و OrderItem ایجاد می‌کند
 
         در این مرحله:
-        - پروفایل بررسی می‌شود
-        - Cart بررسی می‌شود
-        - موجودی بررسی می‌شود
-        - Address بررسی می‌شود
-        - Shipping بررسی می‌شود
-        - Coupon بررسی می‌شود
-        - Order ساخته می‌شود
-        - OrderItem ساخته می‌شود
-        - موجودی رزرو/کسر می‌شود
-        - Cart خالی می‌شود
+        - stock کم نمی‌شود
+        - cart خالی نمی‌شود
+        - coupon مصرف نمی‌شود
+        - tracking code ساخته نمی‌شود
 
-        مصرف واقعی Coupon در Payment موفق ثبت خواهد شد.
+        سفارش در وضعیت PENDING ایجاد می‌شود.
         """
 
         # =====================================================
-        # Profile
+        # 1. USER
         # =====================================================
 
-        OrderService.validate_profile(
-            user
-        )
-
-        # =====================================================
-        # Lock Cart
-        # =====================================================
-
-        cart = (
-            Cart.objects
-            .select_for_update()
-            .get(
-                user=user
+        if not user or not user.is_authenticated:
+            raise ValidationError(
+                "کاربر احراز هویت نشده است."
             )
+
+        # =====================================================
+        # 2. PROFILE
+        # =====================================================
+
+        profile = getattr(
+            user,
+            "profile",
+            None,
         )
 
+        if not profile:
+            raise ValidationError(
+                "پروفایل کاربر وجود ندارد."
+            )
+
+        if not profile.first_name or not profile.last_name:
+            raise ValidationError(
+                "ابتدا نام و نام خانوادگی خود را تکمیل کنید."
+            )
+
         # =====================================================
-        # Lock Cart Items
+        # 3. ADDRESS
         # =====================================================
 
-        items = list(
-            CartItem.objects
-            .select_for_update()
-            .select_related(
+        if not address:
+            raise ValidationError(
+                "انتخاب آدرس الزامی است."
+            )
+
+        if address.user_id != user.id:
+            raise ValidationError(
+                "این آدرس متعلق به شما نیست."
+            )
+
+        # =====================================================
+        # 4. SHIPPING METHOD
+        # =====================================================
+
+        if not shipping_method:
+            raise ValidationError(
+                "انتخاب روش ارسال الزامی است."
+            )
+
+        if not shipping_method.is_active:
+            raise ValidationError(
+                "این روش ارسال در حال حاضر فعال نیست."
+            )
+
+        # =====================================================
+        # 5. LOCK CART
+        # =====================================================
+
+        try:
+
+            cart = (
+                Cart.objects
+                .select_for_update()
+                .get(
+                    user=user
+                )
+            )
+
+        except Cart.DoesNotExist:
+
+            raise ValidationError(
+                "سبد خرید شما وجود ندارد."
+            )
+
+        # =====================================================
+        # 6. CART ITEMS
+        # =====================================================
+
+        cart_items = list(
+            cart.items.select_related(
                 "variant",
                 "variant__product",
                 "variant__size",
                 "variant__color",
             )
-            .filter(
-                cart=cart
-            )
         )
 
-        if not items:
-
-            raise ValueError(
+        if not cart_items:
+            raise ValidationError(
                 "سبد خرید شما خالی است."
             )
 
         # =====================================================
-        # Lock Variants
+        # 7. LOCK VARIANTS
         # =====================================================
 
         variant_ids = [
             item.variant_id
-            for item in items
+            for item in cart_items
+        ]
+
+        locked_variants = {
+            variant.id: variant
+            for variant in (
+                ProductVariant.objects
+                .select_for_update()
+                .select_related(
+                    "product",
+                    "size",
+                    "color",
+                )
+                .filter(
+                    id__in=variant_ids
+                )
+            )
+        }
+
+        # =====================================================
+        # 8. VALIDATE STOCK
+        # =====================================================
+
+        for cart_item in cart_items:
+
+            variant = locked_variants.get(
+                cart_item.variant_id
+            )
+
+            if not variant:
+
+                raise ValidationError(
+                    f"محصول «{cart_item.variant.product.title}» "
+                    "دیگر وجود ندارد."
+                )
+
+            if not variant.is_active:
+
+                raise ValidationError(
+                    f"محصول «{variant.product.title}» "
+                    "دیگر فعال نیست."
+                )
+
+            if variant.stock < cart_item.quantity:
+
+                raise ValidationError(
+                    f"موجودی محصول «{variant.product.title}» "
+                    "برای تعداد انتخاب‌شده کافی نیست."
+                )
+
+        # =====================================================
+        # 9. CALCULATE SUBTOTAL
+        # =====================================================
+
+        subtotal = 0
+
+        for cart_item in cart_items:
+
+            variant = locked_variants[
+                cart_item.variant_id
+            ]
+
+            subtotal += (
+                variant.final_price
+                * cart_item.quantity
+            )
+
+        # =====================================================
+        # 10. COUPON
+        # =====================================================
+
+        discount = 0
+
+        if coupon:
+
+            if not coupon.is_available_for_user(
+                user
+            ):
+                raise ValidationError(
+                    "این کد تخفیف برای شما قابل استفاده نیست."
+                )
+
+            discount = coupon.calculate_discount(
+                subtotal
+            )
+
+            if discount <= 0:
+
+                raise ValidationError(
+                    "این کد تخفیف روی مبلغ سفارش قابل اعمال نیست."
+                )
+
+        # =====================================================
+        # 11. TAXABLE AMOUNT
+        # =====================================================
+
+        taxable_amount = max(
+            subtotal - discount,
+            0
+        )
+
+        # =====================================================
+        # 12. SHIPPING COST
+        # =====================================================
+
+        shipping_cost = (
+            shipping_method.calculate_cost(
+                taxable_amount
+            )
+        )
+
+        # =====================================================
+        # 13. TAX
+        # =====================================================
+
+        tax = (
+            taxable_amount
+            * OrderService.TAX_PERCENT
+        ) // 100
+
+        # =====================================================
+        # 14. TOTAL
+        # =====================================================
+
+        total = (
+            taxable_amount
+            + tax
+            + shipping_cost
+        )
+
+        # =====================================================
+        # 15. CREATE ORDER
+        # =====================================================
+
+        order_data = {
+            "user": user,
+
+            "status": OrderStatus.PENDING,
+
+            "subtotal": subtotal,
+            "discount": discount,
+            "tax": tax,
+            "shipping_cost": shipping_cost,
+            "total": total,
+
+            "coupon": coupon,
+
+            "shipping_method": shipping_method,
+
+            # Address snapshot
+            "recipient_name": address.recipient_name,
+            "recipient_phone": address.recipient_phone,
+            "province": address.province,
+            "city": address.city,
+            "address": address.address,
+            "postal_code": address.postal_code,
+            "plaque": address.plaque,
+            "unit": address.unit,
+        }
+
+        # اگر coupon_code در مدل Order اضافه شده باشد
+        if hasattr(Order, "coupon_code"):
+            order_data["coupon_code"] = (
+                coupon.code
+                if coupon
+                else ""
+            )
+
+        order = Order.objects.create(
+            **order_data
+        )
+
+        # =====================================================
+        # 16. CREATE ORDER ITEMS
+        # =====================================================
+
+        order_items = []
+
+        for cart_item in cart_items:
+
+            variant = locked_variants[
+                cart_item.variant_id
+            ]
+
+            unit_price = variant.final_price
+
+            order_items.append(
+                OrderItem(
+                    order=order,
+
+                    variant=variant,
+
+                    # -----------------------------
+                    # Product snapshot
+                    # -----------------------------
+
+                    product_title=(
+                        variant.product.title
+                    ),
+
+                    size=(
+                        variant.size.title
+                        if variant.size
+                        else ""
+                    ),
+
+                    color=(
+                        variant.color.title
+                        if variant.color
+                        else ""
+                    ),
+
+                    sku=variant.sku,
+
+                    # -----------------------------
+                    # Price snapshot
+                    # -----------------------------
+
+                    unit_price=unit_price,
+
+                    quantity=cart_item.quantity,
+
+                    subtotal=(
+                        unit_price
+                        * cart_item.quantity
+                    ),
+                )
+            )
+
+        OrderItem.objects.bulk_create(
+            order_items
+        )
+
+        return order
+
+    # =========================================================
+    # FINALIZE ORDER
+    # =========================================================
+
+    @staticmethod
+    @transaction.atomic
+    def finalize_order(
+        *,
+        order_id,
+    ):
+        """
+        نهایی کردن سفارش بعد از پرداخت موفق.
+
+        این متد باید فقط بعد از تأیید موفق Payment اجرا شود.
+
+        عملیات:
+        1. Lock Order
+        2. بررسی وضعیت
+        3. Lock ProductVariants
+        4. بررسی موجودی
+        5. Lock Coupon
+        6. ثبت CouponUsage
+        7. کاهش Stock
+        8. حذف/کاهش آیتم‌های Cart
+        9. ساخت Tracking Code
+        10. تغییر وضعیت Order به PAID
+        """
+
+        # =====================================================
+        # 1. LOCK ORDER
+        # =====================================================
+
+        try:
+
+            order = (
+                Order.objects
+                .select_for_update()
+                .select_related(
+                    "user",
+                    "coupon",
+                    "shipping_method",
+                )
+                .get(
+                    id=order_id
+                )
+            )
+
+        except Order.DoesNotExist:
+
+            raise ValidationError(
+                "سفارش مورد نظر پیدا نشد."
+            )
+
+        # =====================================================
+        # 2. IDEMPOTENCY
+        # =====================================================
+
+        if order.status == OrderStatus.PAID:
+
+            return order
+
+        if order.status != OrderStatus.PENDING:
+
+            raise ValidationError(
+                "این سفارش قابل نهایی شدن نیست."
+            )
+
+        # =====================================================
+        # 3. ORDER ITEMS
+        # =====================================================
+
+        order_items = list(
+            OrderItem.objects
+            .filter(
+                order=order
+            )
+        )
+
+        if not order_items:
+
+            raise ValidationError(
+                "این سفارش هیچ آیتمی ندارد."
+            )
+
+        # =====================================================
+        # 4. LOCK VARIANTS
+        # =====================================================
+
+        variant_ids = [
+            item.variant_id
+            for item in order_items
         ]
 
         variants = {
@@ -437,319 +501,260 @@ class OrderService:
         }
 
         # =====================================================
-        # Validate Stock
+        # 5. VALIDATE VARIANTS / STOCK
         # =====================================================
 
-        for item in items:
+        for item in order_items:
 
             variant = variants.get(
                 item.variant_id
             )
 
-            if variant is None:
-                raise ValueError(
-                    "یکی از محصولات سبد خرید دیگر وجود ندارد."
+            if not variant:
+
+                raise ValidationError(
+                    f"محصول «{item.product_title}» "
+                    "دیگر وجود ندارد."
                 )
 
             if not variant.is_active:
-                raise ValueError(
-                    f"محصول «{variant.product.title}» دیگر فعال نیست."
+
+                raise ValidationError(
+                    f"محصول «{item.product_title}» "
+                    "دیگر فعال نیست."
                 )
 
             if variant.stock < item.quantity:
-                raise ValueError(
-                    f"موجودی «{variant.product.title}» کافی نیست."
+
+                raise ValidationError(
+                    f"موجودی محصول «{item.product_title}» "
+                    "برای تکمیل سفارش کافی نیست."
                 )
 
         # =====================================================
-        # Address
-        # =====================================================
-
-        address = OrderService.get_user_address(
-            user=user,
-            address_id=address_id,
-        )
-
-        # =====================================================
-        # Shipping
-        # =====================================================
-
-        shipping_method = (
-            OrderService.get_shipping_method(
-                shipping_method_id
-            )
-        )
-
-        # =====================================================
-        # Subtotal
-        # =====================================================
-
-        subtotal = 0
-
-        for item in items:
-
-            variant = variants[
-                item.variant_id
-            ]
-
-            subtotal += (
-                variant.final_price
-                * item.quantity
-            )
-
-        # =====================================================
-        # Coupon
+        # 6. LOCK COUPON
         # =====================================================
 
         coupon = None
-        coupon_discount = 0
 
-        if coupon_code:
+        if order.coupon_id:
 
-            coupon, coupon_discount = (
-                OrderService.validate_coupon(
-                    user=user,
-                    code=coupon_code,
-                    subtotal=subtotal,
+            coupon = (
+                Coupon.objects
+                .select_for_update()
+                .get(
+                    id=order.coupon_id
                 )
             )
 
-        # =====================================================
-        # Shipping Cost
-        # =====================================================
+            # ---------------------------------------------
+            # Active
+            # ---------------------------------------------
 
-        amount_after_discount = max(
-            subtotal - coupon_discount,
-            0,
-        )
+            if not coupon.is_active:
 
-        shipping_cost = (
-            shipping_method.calculate_cost(
-                amount_after_discount
+                raise ValidationError(
+                    "کد تخفیف دیگر فعال نیست."
+                )
+
+            # ---------------------------------------------
+            # Time
+            # ---------------------------------------------
+
+            if not coupon.is_valid_time:
+
+                raise ValidationError(
+                    "اعتبار زمانی کد تخفیف به پایان رسیده است."
+                )
+
+            # ---------------------------------------------
+            # User access
+            # ---------------------------------------------
+
+            if (
+                not coupon.is_global
+                and not coupon.users.filter(
+                    id=order.user_id
+                ).exists()
+            ):
+
+                raise ValidationError(
+                    "این کد تخفیف برای این کاربر قابل استفاده نیست."
+                )
+
+            # ---------------------------------------------
+            # Global usage limit
+            # ---------------------------------------------
+
+            if coupon.usage_limit is not None:
+
+                total_usage = (
+                    CouponUsage.objects
+                    .filter(
+                        coupon=coupon
+                    )
+                    .count()
+                )
+
+                if total_usage >= coupon.usage_limit:
+
+                    raise ValidationError(
+                        "ظرفیت استفاده از این کد تخفیف تکمیل شده است."
+                    )
+
+            # ---------------------------------------------
+            # User usage limit
+            # ---------------------------------------------
+
+            user_usage = (
+                CouponUsage.objects
+                .filter(
+                    coupon=coupon,
+                    user_id=order.user_id,
+                )
+                .count()
             )
-        )
+
+            if (
+                coupon.usage_limit_per_user is not None
+                and
+                user_usage >= coupon.usage_limit_per_user
+            ):
+
+                raise ValidationError(
+                    "شما قبلاً به حداکثر میزان مجاز "
+                    "از این کد تخفیف استفاده کرده‌اید."
+                )
 
         # =====================================================
-        # Final Price
+        # 7. DECREASE STOCK
         # =====================================================
 
-        total_price = (
-            amount_after_discount
-            + shipping_cost
-        )
-
-        # =====================================================
-        # Order
-        # =====================================================
-
-        order = Order.objects.create(
-
-            user=user,
-
-            order_number=(
-                OrderService.generate_order_number()
-            ),
-
-            status=Order.Status.PENDING,
-
-            coupon=coupon,
-
-            coupon_code=(
-                coupon.code
-                if coupon
-                else ""
-            ),
-
-            coupon_discount=coupon_discount,
-
-            shipping_method=shipping_method,
-
-            shipping_title=shipping_method.title,
-
-            shipping_cost=shipping_cost,
-
-            # -------------------------------------------------
-            # Address Snapshot
-            # -------------------------------------------------
-
-            recipient_name=address.recipient_name,
-
-            recipient_phone=address.recipient_phone,
-
-            province=address.province,
-
-            city=address.city,
-
-            address=address.address,
-
-            postal_code=address.postal_code,
-
-            plaque=address.plaque,
-
-            unit=address.unit,
-
-            # -------------------------------------------------
-            # Price
-            # -------------------------------------------------
-
-            subtotal=subtotal,
-
-            discount_amount=coupon_discount,
-
-            total_price=total_price,
-        )
-
-        # =====================================================
-        # Order Items + Stock
-        # =====================================================
-
-        for item in items:
+        for item in order_items:
 
             variant = variants[
                 item.variant_id
             ]
-
-            unit_price = variant.final_price
-
-            item_subtotal = (
-                unit_price
-                * item.quantity
-            )
-
-            OrderItem.objects.create(
-
-                order=order,
-
-                variant=variant,
-
-                # ---------------------------------------------
-                # Snapshot
-                # ---------------------------------------------
-
-                product_title=(
-                    variant.product.title
-                ),
-
-                sku=variant.sku,
-
-                size=(
-                    variant.size.title
-                ),
-
-                color=(
-                    variant.color.title
-                ),
-
-                color_code=(
-                    variant.color.code
-                ),
-
-                # ---------------------------------------------
-                # Price Snapshot
-                # ---------------------------------------------
-
-                original_unit_price=(
-                    variant.price
-                ),
-
-                discount_percent=(
-                    variant.discount_percent
-                ),
-
-                unit_price=unit_price,
-
-                quantity=item.quantity,
-
-                subtotal=item_subtotal,
-            )
-
-            # ---------------------------------------------
-            # Reserve / decrease stock
-            # ---------------------------------------------
 
             variant.stock -= item.quantity
 
             variant.save(
                 update_fields=[
                     "stock",
-                    "updated_date",
                 ]
             )
 
         # =====================================================
-        # Clear Cart
+        # 8. CREATE COUPON USAGE
         # =====================================================
 
-        CartItem.objects.filter(
-            cart=cart
-        ).delete()
+        if coupon:
 
-        return order
-
-    # =========================================================
-    # Cancel Order
-    # =========================================================
-
-    @staticmethod
-    @transaction.atomic
-    def cancel_order(order):
-
-        order = (
-            Order.objects
-            .select_for_update()
-            .prefetch_related(
-                "items"
-            )
-            .get(
-                pk=order.pk
-            )
-        )
-
-        if order.status != Order.Status.PENDING:
-
-            raise ValueError(
-                "فقط سفارش‌های در انتظار پرداخت قابل لغو هستند."
+            CouponUsage.objects.create(
+                coupon=coupon,
+                user=order.user,
+                order=order,
             )
 
         # =====================================================
-        # Return Stock
+        # 9. CLEAR / UPDATE CART
         # =====================================================
 
-        for item in order.items.all():
+        try:
 
-            variant = (
-                ProductVariant.objects
+            cart = (
+                Cart.objects
                 .select_for_update()
                 .get(
-                    pk=item.variant_id
+                    user=order.user
                 )
             )
 
-            variant.stock += item.quantity
+            for item in order_items:
 
-            variant.save(
-                update_fields=[
-                    "stock",
-                    "updated_date",
-                ]
-            )
+                try:
+
+                    cart_item = (
+                        cart.items
+                        .select_for_update()
+                        .get(
+                            variant_id=item.variant_id
+                        )
+                    )
+
+                except cart.items.model.DoesNotExist:
+
+                    continue
+
+                # اگر کاربر بعد از ساخت Order
+                # همان محصول را دوباره به Cart اضافه کرده
+                # باشد، فقط مقدار مربوط به این Order
+                # را کم می‌کنیم.
+
+                if cart_item.quantity <= item.quantity:
+
+                    cart_item.delete()
+
+                else:
+
+                    cart_item.quantity -= item.quantity
+
+                    cart_item.save(
+                        update_fields=[
+                            "quantity",
+                            "updated_date",
+                        ]
+                    )
+
+        except Cart.DoesNotExist:
+
+            pass
 
         # =====================================================
-        # Cancel
+        # 10. TRACKING CODE
         # =====================================================
 
-        order.status = (
-            Order.Status.CANCELLED
+        tracking_code = (
+            OrderService.generate_tracking_code()
         )
 
-        order.cancelled_at = timezone.now()
+        order.tracking_code = tracking_code
+
+        # =====================================================
+        # 11. CHANGE ORDER STATUS
+        # =====================================================
+
+        order.status = OrderStatus.PAID
 
         order.save(
             update_fields=[
+                "tracking_code",
                 "status",
-                "cancelled_at",
                 "updated_date",
             ]
         )
 
         return order
+
+    # =========================================================
+    # GENERATE TRACKING CODE
+    # =========================================================
+
+    @staticmethod
+    def generate_tracking_code():
+        """
+        ساخت Tracking Code یکتا.
+        """
+
+        while True:
+
+            tracking_code = (
+                "ORD-"
+                + uuid.uuid4().hex[:12].upper()
+            )
+
+            if not Order.objects.filter(
+                tracking_code=tracking_code
+            ).exists():
+
+                return tracking_code
