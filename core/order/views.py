@@ -1,1140 +1,409 @@
-from django.db import transaction
-from django.db.models import Count, Prefetch
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.shortcuts import get_object_or_404
-from django.utils import timezone
 
-from rest_framework.views import APIView
+from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
-from rest_framework import status
+from rest_framework.views import APIView
 
-from cart.models import Cart, CartItem
+from drf_spectacular.utils import extend_schema, OpenApiResponse
 
 from .models import (
     Address,
     ShippingMethod,
     Coupon,
     Order,
-    OrderItem,
 )
-
 from .serializers import (
     AddressSerializer,
     ShippingMethodSerializer,
     CouponApplySerializer,
-    OrderListSerializer,
-    OrderDetailSerializer,
-    CreateOrderSerializer,
+    OrderSerializer,
+    OrderCreateSerializer,
 )
+from .services import OrderService
 
 
 # =========================================================
-# Base
+# ADDRESS
 # =========================================================
 
-class OrderBaseAPIView(APIView):
-
+@extend_schema(
+    tags=["Address"],
+)
+class AddressListCreateAPIView(APIView):
     permission_classes = [IsAuthenticated]
 
-    def get_user_order_queryset(self):
-
-        return (
-            Order.objects
-            .filter(
-                user=self.request.user
-            )
-            .select_related(
-                "user",
-                "coupon",
-                "shipping_method",
-            )
-            .prefetch_related(
-                Prefetch(
-                    "items",
-                    queryset=(
-                        OrderItem.objects
-                        .select_related(
-                            "variant__product",
-                            "variant__size",
-                            "variant__color",
-                        )
-                    ),
-                )
-            )
-        )
-
-
-# =========================================================
-# Address List / Create
-# =========================================================
-
-class AddressListCreateAPIView(
-    OrderBaseAPIView
-):
-
+    @extend_schema(
+        summary="لیست آدرس‌های کاربر",
+        description="تمام آدرس‌های متعلق به کاربر فعلی را برمی‌گرداند.",
+        responses=AddressSerializer(many=True),
+    )
     def get(self, request):
-
         addresses = (
             Address.objects
-            .filter(
-                user=request.user
-            )
-            .order_by(
-                "-is_default",
-                "-created_date",
-            )
+            .filter(user=request.user)
+            .order_by("-is_default", "-created_date")
         )
 
         serializer = AddressSerializer(
             addresses,
             many=True,
+            context={"request": request},
         )
 
         return Response(
-            serializer.data
+            serializer.data,
+            status=status.HTTP_200_OK,
         )
 
+    @extend_schema(
+        summary="ایجاد آدرس جدید",
+        description="یک آدرس جدید برای کاربر فعلی ایجاد می‌کند.",
+        request=AddressSerializer,
+        responses={
+            201: AddressSerializer,
+            400: OpenApiResponse(
+                description="اطلاعات ارسال‌شده معتبر نیست."
+            ),
+        },
+    )
     def post(self, request):
-
         serializer = AddressSerializer(
-            data=request.data
+            data=request.data,
+            context={"request": request},
         )
 
-        serializer.is_valid(
-            raise_exception=True
-        )
+        serializer.is_valid(raise_exception=True)
 
-        address = serializer.save(
-            user=request.user
+        address = serializer.save()
+
+        response_serializer = AddressSerializer(
+            address,
+            context={"request": request},
         )
 
         return Response(
-            AddressSerializer(address).data,
+            response_serializer.data,
             status=status.HTTP_201_CREATED,
         )
 
 
-# =========================================================
-# Address Detail
-# =========================================================
-
-class AddressDetailAPIView(
-    OrderBaseAPIView
-):
+@extend_schema(
+    tags=["Address"],
+)
+class AddressDetailAPIView(APIView):
+    permission_classes = [IsAuthenticated]
 
     def get_object(self, request, pk):
-
         return get_object_or_404(
             Address,
             pk=pk,
             user=request.user,
         )
 
-    def get(self, request, pk):
-
-        address = self.get_object(
-            request,
-            pk,
-        )
-
-        return Response(
-            AddressSerializer(
-                address
-            ).data
-        )
-
+    @extend_schema(
+        summary="ویرایش آدرس",
+        description="آدرس انتخاب‌شده را ویرایش می‌کند.",
+        request=AddressSerializer,
+        responses={
+            200: AddressSerializer,
+            400: OpenApiResponse(
+                description="اطلاعات ارسال‌شده معتبر نیست."
+            ),
+            404: OpenApiResponse(
+                description="آدرس پیدا نشد."
+            ),
+        },
+    )
     def patch(self, request, pk):
-
-        address = self.get_object(
-            request,
-            pk,
-        )
+        address = self.get_object(request, pk)
 
         serializer = AddressSerializer(
             address,
             data=request.data,
             partial=True,
+            context={"request": request},
         )
 
-        serializer.is_valid(
-            raise_exception=True
-        )
+        serializer.is_valid(raise_exception=True)
 
-        serializer.save()
+        address = serializer.save()
+
+        response_serializer = AddressSerializer(
+            address,
+            context={"request": request},
+        )
 
         return Response(
-            serializer.data
+            response_serializer.data,
+            status=status.HTTP_200_OK,
         )
 
+    @extend_schema(
+        summary="حذف آدرس",
+        description="آدرس انتخاب‌شده را حذف می‌کند.",
+        responses={
+            204: OpenApiResponse(
+                description="آدرس با موفقیت حذف شد."
+            ),
+            404: OpenApiResponse(
+                description="آدرس پیدا نشد."
+            ),
+        },
+    )
     def delete(self, request, pk):
-
-        address = self.get_object(
-            request,
-            pk,
-        )
+        address = self.get_object(request, pk)
 
         address.delete()
 
         return Response(
+            {"detail": "آدرس با موفقیت حذف شد."},
+            status=status.HTTP_204_NO_CONTENT,
+        )
+
+
+# =========================================================
+# SHIPPING METHODS
+# =========================================================
+
+@extend_schema(
+    tags=["Shipping"],
+)
+class ShippingMethodListAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        summary="لیست روش‌های ارسال",
+        description="تمام روش‌های ارسال فعال را نمایش می‌دهد.",
+        responses=ShippingMethodSerializer(many=True),
+    )
+    def get(self, request):
+        shipping_methods = (
+            ShippingMethod.objects
+            .filter(is_active=True)
+            .order_by("display_order", "id")
+        )
+
+        serializer = ShippingMethodSerializer(
+            shipping_methods,
+            many=True,
+        )
+
+        return Response(
+            serializer.data,
+            status=status.HTTP_200_OK,
+        )
+
+
+# =========================================================
+# COUPON
+# =========================================================
+
+@extend_schema(
+    tags=["Coupon"],
+)
+class CouponApplyAPIView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    @extend_schema(
+        summary="بررسی کد تخفیف",
+        description=(
+            "کد تخفیف را بررسی می‌کند. "
+            "در این مرحله کد تخفیف مصرف نمی‌شود."
+        ),
+        request=CouponApplySerializer,
+        responses={
+            200: OpenApiResponse(
+                description="کد تخفیف معتبر است."
+            ),
+            400: OpenApiResponse(
+                description="کد تخفیف معتبر نیست یا قابل استفاده نیست."
+            ),
+        },
+    )
+    def post(self, request):
+        serializer = CouponApplySerializer(
+            data=request.data,
+            context={"request": request},
+        )
+
+        serializer.is_valid(raise_exception=True)
+
+        coupon = serializer.validated_data["coupon"]
+
+        return Response(
             {
-                "detail": "آدرس با موفقیت حذف شد."
+                "detail": "کد تخفیف معتبر است.",
+                "code": coupon.code,
+                "discount_type": coupon.discount_type,
+                "discount_value": coupon.discount_value,
+                "minimum_order_amount": coupon.minimum_order_amount,
             },
             status=status.HTTP_200_OK,
         )
 
 
 # =========================================================
-# Shipping Methods
+# ORDER CREATE
 # =========================================================
 
-class ShippingMethodListAPIView(
-    OrderBaseAPIView
-):
+@extend_schema(
+    tags=["Order"],
+)
+class OrderCreateAPIView(APIView):
+    permission_classes = [IsAuthenticated]
 
-    def get(self, request):
-
-        cart = (
-            Cart.objects
-            .filter(
-                user=request.user
-            )
-            .prefetch_related(
-                "items__variant__product",
-            )
-            .first()
-        )
-
-        subtotal = 0
-
-        if cart:
-
-            subtotal = sum(
-                item.subtotal
-                for item in cart.items.all()
-            )
-
-        methods = (
-            ShippingMethod.objects
-            .filter(
-                is_active=True
-            )
-            .order_by(
-                "display_order",
-                "id",
-            )
-        )
-
-        serializer = ShippingMethodSerializer(
-            methods,
-            many=True,
-            context={
-                "request": request,
-                "subtotal": subtotal,
-            },
-        )
-
-        return Response(
-            {
-                "subtotal": subtotal,
-                "shipping_methods": serializer.data,
-            }
-        )
-
-
-# =========================================================
-# Coupon Apply
-# =========================================================
-
-class CouponApplyAPIView(
-    OrderBaseAPIView
-):
-
+    @extend_schema(
+        summary="ایجاد سفارش",
+        description=(
+            "از روی سبد خرید کاربر یک سفارش ایجاد می‌کند. "
+            "آدرس و روش ارسال الزامی هستند و کد تخفیف اختیاری است."
+        ),
+        request=OrderCreateSerializer,
+        responses={
+            201: OrderSerializer,
+            400: OpenApiResponse(
+                description="اطلاعات سفارش معتبر نیست."
+            ),
+        },
+    )
     def post(self, request):
-
-        serializer = CouponApplySerializer(
+        serializer = OrderCreateSerializer(
             data=request.data
         )
 
-        serializer.is_valid(
-            raise_exception=True
-        )
+        serializer.is_valid(raise_exception=True)
 
-        code = serializer.validated_data["code"]
-
-        coupon = (
-            Coupon.objects
-            .filter(
-                code=code
-            )
-            .first()
-        )
-
-        if not coupon:
-
-            return Response(
-                {
-                    "detail": "کد تخفیف معتبر نیست."
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        # -------------------------------------------------
-        # Time / Active
-        # -------------------------------------------------
-
-        if not coupon.is_valid_time:
-
-            return Response(
-                {
-                    "detail": (
-                        "این کد تخفیف در حال حاضر فعال نیست."
-                    )
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        # -------------------------------------------------
-        # Allowed Users
-        # -------------------------------------------------
-
-        if not coupon.is_available_for_user(
-            request.user
-        ):
-
-            return Response(
-                {
-                    "detail": (
-                        "شما مجاز به استفاده از "
-                        "این کد تخفیف نیستید."
-                    )
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        # -------------------------------------------------
-        # Cart
-        # -------------------------------------------------
-
-        cart = (
-            Cart.objects
-            .filter(
-                user=request.user
-            )
-            .prefetch_related(
-                "items__variant__product",
-            )
-            .first()
-        )
-
-        if not cart or not cart.items.exists():
-
-            return Response(
-                {
-                    "detail": "سبد خرید شما خالی است."
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        # -------------------------------------------------
-        # Stock + Subtotal
-        # -------------------------------------------------
-
-        subtotal = 0
-
-        for item in cart.items.all():
-
-            variant = item.variant
-
-            if not variant.is_active:
-
-                return Response(
-                    {
-                        "detail": (
-                            f"محصول «{variant.product.title}» "
-                            "دیگر فعال نیست."
-                        )
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-
-            if variant.stock <= 0:
-
-                return Response(
-                    {
-                        "detail": (
-                            f"محصول «{variant.product.title}» "
-                            "ناموجود است."
-                        )
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-
-            if item.quantity > variant.stock:
-
-                return Response(
-                    {
-                        "detail": (
-                            f"موجودی محصول "
-                            f"«{variant.product.title}» "
-                            f"فقط {variant.stock} عدد است."
-                        )
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-
-            subtotal += (
-                variant.final_price
-                * item.quantity
-            )
-
-        # -------------------------------------------------
-        # Minimum Order
-        # -------------------------------------------------
-
-        if subtotal < coupon.minimum_order_amount:
-
-            return Response(
-                {
-                    "detail": (
-                        "حداقل مبلغ سفارش برای "
-                        "استفاده از این کد تخفیف "
-                        f"{coupon.minimum_order_amount:,} تومان است."
-                    )
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        # -------------------------------------------------
-        # Per User Usage
-        # -------------------------------------------------
-
-        user_usage_count = (
-            coupon.usages
-            .filter(
-                user=request.user
-            )
-            .count()
-        )
-
-        if (
-            user_usage_count
-            >= coupon.usage_limit_per_user
-        ):
-
-            return Response(
-                {
-                    "detail": (
-                        "شما قبلاً به حداکثر "
-                        "دفعات مجاز استفاده از "
-                        "این کد تخفیف رسیده‌اید."
-                    )
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        # -------------------------------------------------
-        # Global Usage
-        # -------------------------------------------------
-
-        if coupon.usage_limit is not None:
-
-            total_usage = coupon.usages.count()
-
-            if total_usage >= coupon.usage_limit:
-
-                return Response(
-                    {
-                        "detail": (
-                            "ظرفیت استفاده از این "
-                            "کد تخفیف تکمیل شده است."
-                        )
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-
-        # -------------------------------------------------
-        # Calculate Discount
-        # -------------------------------------------------
-
-        discount = coupon.calculate_discount(
-            subtotal
-        )
-
-        final_price = max(
-            subtotal - discount,
-            0,
-        )
-
-        return Response(
-            {
-                "valid": True,
-                "code": coupon.code,
-                "discount_type": coupon.discount_type,
-                "discount_value": coupon.discount_value,
-                "discount_amount": discount,
-                "subtotal": subtotal,
-                "final_price": final_price,
-            }
-        )
-
-
-# =========================================================
-# Create Order
-# =========================================================
-
-class OrderCreateAPIView(
-    OrderBaseAPIView
-):
-
-    @transaction.atomic
-    def post(self, request):
-
-        # =================================================
-        # Validate Request
-        # =================================================
-
-        serializer = CreateOrderSerializer(
-            data=request.data,
-            context={
-                "request": request,
-            },
-        )
-
-        serializer.is_valid(
-            raise_exception=True
-        )
-
-        address_id = (
-            serializer.validated_data[
-                "address_id"
-            ]
-        )
-
-        shipping_method_id = (
-            serializer.validated_data[
-                "shipping_method_id"
-            ]
-        )
-
-        coupon_code = (
-            serializer.validated_data.get(
-                "coupon_code"
-            )
-        )
-
-        # =================================================
-        # Profile Validation
-        # =================================================
-
-        profile = getattr(
-            request.user,
-            "profile",
-            None,
-        )
-
-        if not profile:
-
-            return Response(
-                {
-                    "detail": (
-                        "پروفایل شما کامل نیست. "
-                        "لطفاً ابتدا پروفایل خود را تکمیل کنید."
-                    ),
-                    "code": "PROFILE_REQUIRED",
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        if (
-            not profile.first_name
-            or not profile.last_name
-        ):
-
-            return Response(
-                {
-                    "detail": (
-                        "نام و نام خانوادگی شما کامل نیست. "
-                        "لطفاً ابتدا پروفایل خود را تکمیل کنید."
-                    ),
-                    "code": "PROFILE_INCOMPLETE",
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        # =================================================
-        # Address
-        # =================================================
+        address_id = serializer.validated_data["address_id"]
+        shipping_method_id = serializer.validated_data["shipping_method_id"]
+        coupon_code = serializer.validated_data.get("coupon_code")
 
         address = get_object_or_404(
             Address,
-            pk=address_id,
+            id=address_id,
             user=request.user,
         )
-
-        # =================================================
-        # Shipping
-        # =================================================
 
         shipping_method = get_object_or_404(
             ShippingMethod,
-            pk=shipping_method_id,
+            id=shipping_method_id,
             is_active=True,
         )
 
-        # =================================================
-        # Lock Cart
-        # =================================================
-
-        cart = (
-            Cart.objects
-            .select_for_update()
-            .filter(
-                user=request.user
-            )
-            .first()
-        )
-
-        if not cart:
-
-            return Response(
-                {
-                    "detail": (
-                        "سبد خرید شما وجود ندارد."
-                    )
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        cart_items = list(
-            CartItem.objects
-            .select_for_update()
-            .select_related(
-                "variant__product",
-                "variant__size",
-                "variant__color",
-            )
-            .filter(
-                cart=cart
-            )
-        )
-
-        if not cart_items:
-
-            return Response(
-                {
-                    "detail": (
-                        "سبد خرید شما خالی است."
-                    )
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        # =================================================
-        # Validate Products + Calculate Subtotal
-        # =================================================
-
-        subtotal = 0
-
-        for item in cart_items:
-
-            variant = item.variant
-
-            if not variant.is_active:
-
-                return Response(
-                    {
-                        "detail": (
-                            f"محصول «{variant.product.title}» "
-                            "دیگر فعال نیست."
-                        )
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-
-            if variant.stock <= 0:
-
-                return Response(
-                    {
-                        "detail": (
-                            f"محصول «{variant.product.title}» "
-                            "ناموجود است."
-                        )
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-
-            if item.quantity > variant.stock:
-
-                return Response(
-                    {
-                        "detail": (
-                            f"موجودی محصول "
-                            f"«{variant.product.title}» "
-                            f"فقط {variant.stock} عدد است."
-                        )
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-
-            subtotal += (
-                variant.final_price
-                * item.quantity
-            )
-
-        # =================================================
-        # Coupon
-        # =================================================
-
         coupon = None
-        coupon_discount = 0
-        normalized_coupon_code = ""
 
         if coupon_code:
-
-            normalized_coupon_code = (
-                coupon_code.strip().upper()
+            coupon = get_object_or_404(
+                Coupon,
+                code=coupon_code.strip().upper(),
             )
 
-            coupon = (
-                Coupon.objects
-                .select_for_update()
-                .filter(
-                    code=normalized_coupon_code
-                )
-                .first()
+        try:
+            order = OrderService.create_order(
+                user=request.user,
+                address=address,
+                shipping_method=shipping_method,
+                coupon=coupon,
             )
 
-            if not coupon:
+        except DjangoValidationError as exc:
+            if hasattr(exc, "message_dict"):
+                detail = exc.message_dict
+            else:
+                detail = {
+                    "detail": exc.messages
+                }
 
-                return Response(
-                    {
-                        "detail": (
-                            "کد تخفیف معتبر نیست."
-                        )
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-
-            # ---------------------------------------------
-            # Active / Time
-            # ---------------------------------------------
-
-            if not coupon.is_valid_time:
-
-                return Response(
-                    {
-                        "detail": (
-                            "کد تخفیف منقضی شده "
-                            "یا هنوز فعال نشده است."
-                        )
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-
-            # ---------------------------------------------
-            # Allowed Users
-            # ---------------------------------------------
-
-            if not coupon.is_available_for_user(
-                request.user
-            ):
-
-                return Response(
-                    {
-                        "detail": (
-                            "شما مجاز به استفاده از "
-                            "این کد تخفیف نیستید."
-                        )
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-
-            # ---------------------------------------------
-            # Per User Limit
-            # ---------------------------------------------
-
-            user_usage_count = (
-                coupon.usages
-                .filter(
-                    user=request.user
-                )
-                .count()
+            return Response(
+                detail,
+                status=status.HTTP_400_BAD_REQUEST,
             )
 
-            if (
-                user_usage_count
-                >= coupon.usage_limit_per_user
-            ):
-
-                return Response(
-                    {
-                        "detail": (
-                            "شما دیگر مجاز به استفاده "
-                            "از این کد تخفیف نیستید."
-                        )
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-
-            # ---------------------------------------------
-            # Global Limit
-            # ---------------------------------------------
-
-            if coupon.usage_limit is not None:
-
-                total_usage = coupon.usages.count()
-
-                if total_usage >= coupon.usage_limit:
-
-                    return Response(
-                        {
-                            "detail": (
-                                "ظرفیت استفاده از "
-                                "این کد تخفیف تکمیل شده است."
-                            )
-                        },
-                        status=status.HTTP_400_BAD_REQUEST,
-                    )
-
-            # ---------------------------------------------
-            # Minimum Order
-            # ---------------------------------------------
-
-            if (
-                subtotal
-                < coupon.minimum_order_amount
-            ):
-
-                return Response(
-                    {
-                        "detail": (
-                            "مبلغ سبد خرید شما "
-                            "به حداقل مبلغ لازم "
-                            "برای این کد تخفیف نمی‌رسد."
-                        )
-                    },
-                    status=status.HTTP_400_BAD_REQUEST,
-                )
-
-            coupon_discount = (
-                coupon.calculate_discount(
-                    subtotal
-                )
-            )
-
-        # =================================================
-        # Shipping Cost
-        # =================================================
-
-        shipping_cost = (
-            shipping_method.calculate_cost(
-                subtotal
-            )
+        response_serializer = OrderSerializer(
+            order,
+            context={"request": request},
         )
-
-        # =================================================
-        # Final Price
-        # =================================================
-
-        total_price = max(
-            subtotal
-            - coupon_discount
-            + shipping_cost,
-            0,
-        )
-
-        # =================================================
-        # Create Order
-        # =================================================
-        #
-        # IMPORTANT:
-        # در این مرحله موجودی کم نمی‌شود.
-        #
-        # موجودی فقط بعد از پرداخت موفق
-        # در Payment کم خواهد شد.
-        #
-        # =================================================
-
-        order = Order.objects.create(
-
-            user=request.user,
-
-            status=Order.Status.PENDING,
-
-            coupon=coupon,
-
-            coupon_code=(
-                normalized_coupon_code
-                if coupon
-                else ""
-            ),
-
-            coupon_discount=coupon_discount,
-
-            shipping_method=shipping_method,
-
-            shipping_title=shipping_method.title,
-
-            shipping_cost=shipping_cost,
-
-            # ---------------------------------------------
-            # Address Snapshot
-            # ---------------------------------------------
-
-            recipient_name=(
-                address.recipient_name
-            ),
-
-            recipient_phone=(
-                address.recipient_phone
-            ),
-
-            province=address.province,
-
-            city=address.city,
-
-            address=address.address,
-
-            postal_code=address.postal_code,
-
-            plaque=address.plaque,
-
-            unit=address.unit,
-
-            # ---------------------------------------------
-            # Price
-            # ---------------------------------------------
-
-            subtotal=subtotal,
-
-            discount_amount=coupon_discount,
-
-            total_price=total_price,
-        )
-
-        # =================================================
-        # Create Order Items
-        # =================================================
-        #
-        # فقط Snapshot می‌گیریم.
-        # موجودی اینجا تغییر نمی‌کند.
-        #
-        # =================================================
-
-        for item in cart_items:
-
-            variant = item.variant
-
-            unit_price = variant.final_price
-
-            OrderItem.objects.create(
-
-                order=order,
-
-                variant=variant,
-
-                # -----------------------------------------
-                # Product Snapshot
-                # -----------------------------------------
-
-                product_title=(
-                    variant.product.title
-                ),
-
-                sku=variant.sku,
-
-                size=(
-                    variant.size.title
-                    if variant.size
-                    else ""
-                ),
-
-                color=(
-                    variant.color.title
-                    if variant.color
-                    else ""
-                ),
-
-                color_code=(
-                    variant.color.code
-                    if variant.color
-                    else ""
-                ),
-
-                # -----------------------------------------
-                # Price Snapshot
-                # -----------------------------------------
-
-                original_unit_price=(
-                    variant.price
-                ),
-
-                discount_percent=(
-                    variant.discount_percent
-                ),
-
-                unit_price=unit_price,
-
-                quantity=item.quantity,
-
-                subtotal=(
-                    unit_price
-                    * item.quantity
-                ),
-            )
-
-        # =================================================
-        # Clear Cart
-        # =================================================
-
-        CartItem.objects.filter(
-            cart=cart
-        ).delete()
-
-        # =================================================
-        # Response
-        # =================================================
 
         return Response(
-            {
-                "detail": (
-                    "سفارش با موفقیت ایجاد شد."
-                ),
-
-                "order": OrderDetailSerializer(
-                    order,
-                    context={
-                        "request": request,
-                    },
-                ).data,
-
-                "next_step": "payment",
-            },
+            response_serializer.data,
             status=status.HTTP_201_CREATED,
         )
 
 
 # =========================================================
-# My Orders
+# MY ORDERS
 # =========================================================
 
-class MyOrdersAPIView(
-    OrderBaseAPIView
-):
+@extend_schema(
+    tags=["Order"],
+)
+class MyOrderListAPIView(APIView):
+    permission_classes = [IsAuthenticated]
 
+    @extend_schema(
+        summary="لیست سفارش‌های من",
+        description="تمام سفارش‌های کاربر فعلی را نمایش می‌دهد.",
+        responses=OrderSerializer(many=True),
+    )
     def get(self, request):
-
         orders = (
-            self.get_user_order_queryset()
-            .annotate(
-                items_count=Count(
-                    "items"
-                )
+            Order.objects
+            .filter(user=request.user)
+            .select_related(
+                "coupon",
+                "shipping_method",
             )
+            .prefetch_related("items")
+            .order_by("-created_date")
         )
 
-        serializer = OrderListSerializer(
+        serializer = OrderSerializer(
             orders,
             many=True,
+            context={"request": request},
         )
 
         return Response(
-            serializer.data
+            serializer.data,
+            status=status.HTTP_200_OK,
         )
 
 
-# =========================================================
-# Order Detail
-# =========================================================
+@extend_schema(
+    tags=["Order"],
+)
+class MyOrderDetailAPIView(APIView):
+    permission_classes = [IsAuthenticated]
 
-class OrderDetailAPIView(
-    OrderBaseAPIView
-):
-
-    def get(self, request, order_number):
-
-        order = get_object_or_404(
-            self.get_user_order_queryset(),
-            order_number=order_number,
-        )
-
-        serializer = OrderDetailSerializer(
-            order,
-            context={
-                "request": request,
-            },
-        )
-
-        return Response(
-            serializer.data
-        )
-
-
-# =========================================================
-# Cancel Order
-# =========================================================
-
-class OrderCancelAPIView(
-    OrderBaseAPIView
-):
-
-    @transaction.atomic
-    def post(self, request, order_number):
-
+    @extend_schema(
+        summary="جزئیات سفارش",
+        description="جزئیات یک سفارش متعلق به کاربر فعلی را نمایش می‌دهد.",
+        responses={
+            200: OrderSerializer,
+            404: OpenApiResponse(
+                description="سفارش پیدا نشد."
+            ),
+        },
+    )
+    def get(self, request, pk):
         order = get_object_or_404(
             Order.objects
-            .select_for_update()
-            .filter(
-                user=request.user
-            ),
-            order_number=order_number,
-        )
-
-        # -------------------------------------------------
-        # Only Pending orders
-        # -------------------------------------------------
-
-        if order.status != Order.Status.PENDING:
-
-            return Response(
-                {
-                    "detail": (
-                        "این سفارش در وضعیت فعلی "
-                        "قابل لغو نیست."
-                    )
-                },
-                status=status.HTTP_400_BAD_REQUEST,
+            .select_related(
+                "coupon",
+                "shipping_method",
             )
-
-        # -------------------------------------------------
-        # Cancel
-        # -------------------------------------------------
-        #
-        # IMPORTANT:
-        # در زمان Create Order موجودی کم نشده،
-        # بنابراین هنگام Cancel چیزی هم برنمی‌گردانیم.
-        #
-        # -------------------------------------------------
-
-        order.status = (
-            Order.Status.CANCELLED
+            .prefetch_related("items"),
+            pk=pk,
+            user=request.user,
         )
 
-        order.cancelled_at = timezone.now()
-
-        order.save(
-            update_fields=[
-                "status",
-                "cancelled_at",
-                "updated_date",
-            ],
+        serializer = OrderSerializer(
+            order,
+            context={"request": request},
         )
 
         return Response(
-            {
-                "detail": (
-                    "سفارش با موفقیت لغو شد."
-                )
-            },
+            serializer.data,
             status=status.HTTP_200_OK,
         )
