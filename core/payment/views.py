@@ -1,110 +1,467 @@
-# from rest_framework.views import APIView
-# from rest_framework.response import Response
-# from rest_framework import status
-# from django.conf import settings
-# from .models import PaymentModel, PaymentStatusType
-# from .zarinpal_clients import ZarinPalSandbox
-# from order.models import OrderModel, OrderStatusType
-# from django.db import transaction
-# from django.shortcuts import redirect, get_object_or_404
+from django.core.exceptions import ValidationError as DjangoValidationError
+from django.urls import reverse
 
-# class PaymentRequestApiView(APIView):
+from rest_framework import status
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from rest_framework.views import APIView
 
-#     def post(self, request, order_id):
-#         user = request.user
+from drf_spectacular.utils import (
+    extend_schema,
+    OpenApiResponse,
+)
 
-#         order = get_object_or_404(
-#             OrderModel,
-#             id=order_id,
-#             user=user,
-#             status=OrderStatusType.PENDING.value
-#         )
+from order.models import Order
+from order.serializers import OrderSerializer
 
-#         # جلوگیری از پرداخت تکراری
-#         if hasattr(order, "payment"):
-#             if order.payment.status == PaymentStatusType.SUCCESS.value:
-#                 return Response(
-#                     {"error": "این سفارش قبلا پرداخت شده"},
-#                     status=status.HTTP_400_BAD_REQUEST
-#                 )
-
-#         amount = int(order.total_price) * 10  # تومان → ریال
-
-#         zarinpal = ZarinPalSandbox(
-#             merchant=settings.ZARINPAL_MERCHANT_ID,
-#             amount=amount
-#         )
-
-#         authority = zarinpal.payment_request(
-#             description=f"پرداخت سفارش {order.id}"
-#         )
-
-#         payment = PaymentModel.objects.create(
-#             authority_id=authority,
-#             amount=order.total_price
-#         )
-
-#         order.payment = payment
-#         order.save()
-
-#         return Response({
-#             "payment_url": zarinpal.generate_payment_url(authority),
-#             "authority": authority
-#         })
-        
-
-# from django.db import transaction
-# from django.shortcuts import redirect
-# from payment.models import PaymentModel, PaymentStatusType
-# from order.models import OrderModel
+from .models import Payment, PaymentStatus
+from .serializers import (
+    PaymentCreateSerializer,
+    PaymentSerializer,
+)
+from .services import PaymentService
 
 
-# class PaymentVerifyApiView(APIView):
+# =========================================================
+# CREATE PAYMENT
+# =========================================================
 
-#     def get(self, request):
-#         authority = request.GET.get("Authority")
-#         status = request.GET.get("Status")
+class PaymentCreateAPIView(APIView):
+    permission_classes = [IsAuthenticated]
 
-#         try:
-#             payment_obj = PaymentModel.objects.get(authority_id=authority)
-#         except PaymentModel.DoesNotExist:
-#             return Response({"error": "payment not found"}, status=404)
+    @extend_schema(
+        tags=["Payment"],
+        summary="ایجاد درخواست پرداخت",
+        description=(
+            "برای سفارش یک درخواست پرداخت ایجاد می‌کند "
+            "و به درگاه ZarinPal متصل می‌شود."
+        ),
+        request=PaymentCreateSerializer,
+        responses={
+            201: OpenApiResponse(
+                description="درخواست پرداخت با موفقیت ایجاد شد."
+            ),
+            400: OpenApiResponse(
+                description="اطلاعات پرداخت نامعتبر است."
+            ),
+            404: OpenApiResponse(
+                description="سفارش پیدا نشد."
+            ),
+        },
+    )
+    def post(self, request):
 
-#         if status != "OK":
-#             payment_obj.status = PaymentStatusType.FAILED
-#             payment_obj.save()
-#             return redirect("order:order-failed")
+        serializer = PaymentCreateSerializer(
+            data=request.data,
+            context={"request": request},
+        )
 
-#         order = payment_obj.order  # ← از related_name استفاده کن
+        serializer.is_valid(raise_exception=True)
 
-#         zp = ZarinPalSandbox(settings.ZARINPAL_MERCHANT_ID, payment_obj.amount)
-#         result = zp.payment_verify(payment_obj.amount, authority)
+        order_id = serializer.validated_data["order_id"]
 
-#         if result["code"] == 100:
-#             with transaction.atomic():
-#                 payment_obj.ref_id = result["ref_id"]
-#                 payment_obj.status = PaymentStatusType.SUCCESS
-#                 payment_obj.response_json = result
-#                 payment_obj.save()
+        # -------------------------------------------------
+        # پیدا کردن سفارش متعلق به کاربر
+        # -------------------------------------------------
 
-#                 order.status = "paid"
-#                 order.save()
+        try:
+            order = Order.objects.get(
+                id=order_id,
+                user=request.user,
+            )
 
-#                 # کاهش موجودی
-#                 for item in order.order_items.all():
-#                     variant = item.variant
-#                     if variant.stock < item.quantity:
-#                         raise Exception("stock error")
-#                     variant.stock -= item.quantity
-#                     variant.save()
+        except Order.DoesNotExist:
+            return Response(
+                {
+                    "success": False,
+                    "message": "سفارش مورد نظر پیدا نشد.",
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
 
-#                 # منقضی کردن کد تخفیف
-#                 if order.coupon:
-#                     order.coupon.is_active = False
-#                     order.coupon.save()
+        # -------------------------------------------------
+        # Callback URL
+        # -------------------------------------------------
 
-#             return redirect("order:order-success")
+        callback_url = request.build_absolute_uri(
+            reverse("payment:payment-callback")
+        )
 
-#         payment_obj.status = PaymentStatusType.FAILED
-#         payment_obj.save()
-#         return redirect("order:order-failed")
+        # -------------------------------------------------
+        # Create Payment
+        # -------------------------------------------------
+
+        try:
+            result = PaymentService.create_payment(
+                user=request.user,
+                order=order,
+                callback_url=callback_url,
+            )
+
+        except DjangoValidationError as exc:
+
+            if hasattr(exc, "message_dict"):
+                detail = exc.message_dict
+            else:
+                detail = exc.messages
+
+            return Response(
+                {
+                    "success": False,
+                    "message": "ایجاد درخواست پرداخت ناموفق بود.",
+                    "detail": detail,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        payment = result["payment"]
+
+        # -------------------------------------------------
+        # Response
+        # -------------------------------------------------
+
+        return Response(
+            {
+                "success": True,
+                "message": "درخواست پرداخت با موفقیت ایجاد شد.",
+
+                "payment": PaymentSerializer(
+                    payment
+                ).data,
+
+                "payment_url": result["payment_url"],
+
+                "is_new": result["is_new"],
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+
+# =========================================================
+# PAYMENT CALLBACK
+# =========================================================
+
+class PaymentCallbackAPIView(APIView):
+
+    @extend_schema(
+        tags=["Payment"],
+        summary="Callback درگاه پرداخت",
+        description=(
+            "Callback ارسال‌شده توسط ZarinPal را دریافت می‌کند. "
+            "در صورت موفق بودن پرداخت، تراکنش Verify شده و "
+            "سفارش نهایی می‌شود."
+        ),
+        responses={
+            200: OpenApiResponse(
+                description="پرداخت با موفقیت تأیید شد."
+            ),
+            400: OpenApiResponse(
+                description="پرداخت ناموفق یا لغو شده است."
+            ),
+            404: OpenApiResponse(
+                description="پرداخت پیدا نشد."
+            ),
+        },
+    )
+    def get(self, request):
+
+        authority = request.query_params.get("Authority")
+        gateway_status = request.query_params.get("Status")
+
+        # =================================================
+        # CHECK AUTHORITY
+        # =================================================
+
+        if not authority:
+
+            return Response(
+                {
+                    "success": False,
+                    "message": "Authority دریافت نشد.",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # =================================================
+        # FIND PAYMENT
+        # =================================================
+
+        try:
+            payment = (
+                Payment.objects
+                .select_related(
+                    "order",
+                    "user",
+                )
+                .get(
+                    authority=authority
+                )
+            )
+
+        except Payment.DoesNotExist:
+
+            return Response(
+                {
+                    "success": False,
+                    "message": "پرداخت مورد نظر پیدا نشد.",
+                    "authority": authority,
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        # =================================================
+        # ALREADY VERIFIED
+        # =================================================
+
+        if payment.status == PaymentStatus.SUCCESS:
+
+            order = payment.order
+
+            return Response(
+                {
+                    "success": True,
+
+                    "message": (
+                        "این پرداخت قبلاً با موفقیت "
+                        "تأیید شده است."
+                    ),
+
+                    "payment": PaymentSerializer(
+                        payment
+                    ).data,
+
+                    "order": OrderSerializer(
+                        order
+                    ).data,
+
+                    "sms": {
+                        "user": (
+                            "پرداخت این سفارش قبلاً "
+                            "با موفقیت ثبت شده است."
+                        ),
+
+                        "admin": (
+                            "این سفارش قبلاً با موفقیت "
+                            "پرداخت شده است."
+                        ),
+                    },
+
+                    "cart_cleared": True,
+                    "stock_updated": True,
+                    "coupon_used": bool(
+                        order.coupon_id
+                    ),
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        # =================================================
+        # PAYMENT CANCELED BY USER
+        # =================================================
+
+        if gateway_status != "OK":
+
+            payment.status = PaymentStatus.CANCELED
+
+            existing_gateway_data = (
+                payment.gateway_data
+                if isinstance(
+                    payment.gateway_data,
+                    dict
+                )
+                else {}
+            )
+
+            payment.gateway_data = {
+                **existing_gateway_data,
+
+                "callback": {
+                    "Authority": authority,
+                    "Status": gateway_status,
+                },
+            }
+
+            payment.error_code = "PAYMENT_CANCELED"
+
+            payment.error_message = (
+                "کاربر پرداخت را لغو کرد."
+            )
+
+            payment.save(
+                update_fields=[
+                    "status",
+                    "gateway_data",
+                    "error_code",
+                    "error_message",
+                    "updated_date",
+                ]
+            )
+
+            # -------------------------------------------------
+            # در پرداخت لغو شده:
+            #
+            # Cart دست نمی‌خورد
+            # Stock دست نمی‌خورد
+            # Coupon مصرف نمی‌شود
+            # -------------------------------------------------
+
+            return Response(
+                {
+                    "success": False,
+
+                    "message": "پرداخت لغو شد.",
+
+                    "payment": PaymentSerializer(
+                        payment
+                    ).data,
+
+                    "order": OrderSerializer(
+                        payment.order
+                    ).data,
+
+                    "cart_unchanged": True,
+                    "stock_unchanged": True,
+                    "coupon_unchanged": True,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # =================================================
+        # VERIFY PAYMENT
+        # =================================================
+
+        try:
+
+            result = PaymentService.verify_payment(
+                payment=payment
+            )
+
+        except DjangoValidationError as exc:
+
+            if hasattr(exc, "message_dict"):
+                detail = exc.message_dict
+            else:
+                detail = exc.messages
+
+            return Response(
+                {
+                    "success": False,
+
+                    "message": (
+                        "خطا در تأیید و نهایی کردن پرداخت."
+                    ),
+
+                    "detail": detail,
+
+                    "payment": PaymentSerializer(
+                        payment
+                    ).data,
+
+                    "cart_unchanged": True,
+                    "stock_unchanged": True,
+                    "coupon_unchanged": True,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # =================================================
+        # VERIFY FAILED
+        # =================================================
+
+        if not result["success"]:
+
+            payment = result["payment"]
+
+            return Response(
+                {
+                    "success": False,
+
+                    "message": (
+                        "پرداخت توسط زرین‌پال "
+                        "تأیید نشد."
+                    ),
+
+                    "payment": PaymentSerializer(
+                        payment
+                    ).data,
+
+                    "order": OrderSerializer(
+                        payment.order
+                    ).data,
+
+                    "error_code": result.get(
+                        "error_code"
+                    ),
+
+                    "error_message": result.get(
+                        "error_message"
+                    ),
+
+                    # هیچ عملیات نهایی انجام نشده
+                    "cart_unchanged": True,
+                    "stock_unchanged": True,
+                    "coupon_unchanged": True,
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # =================================================
+        # VERIFY SUCCESS
+        # =================================================
+
+        payment = result["payment"]
+        order = result["order"]
+
+        # =================================================
+        # SMS
+        # =================================================
+
+        user_sms = (
+            f"پرداخت سفارش شما با موفقیت انجام شد. "
+            f"شماره پیگیری: {order.tracking_code} "
+            f"- مبلغ: {payment.amount}"
+        )
+
+        admin_sms = (
+            f"سفارش جدید با موفقیت پرداخت شد. "
+            f"شماره پیگیری: {order.tracking_code} "
+            f"- کاربر: {payment.user.phone_number} "
+            f"- مبلغ: {payment.amount}"
+        )
+
+        # =================================================
+        # FINAL RESPONSE
+        # =================================================
+
+        return Response(
+            {
+                "success": True,
+
+                "message": (
+                    "پرداخت با موفقیت تأیید شد "
+                    "و سفارش نهایی شد."
+                ),
+
+                "payment": PaymentSerializer(
+                    payment
+                ).data,
+
+                "order": OrderSerializer(
+                    order
+                ).data,
+
+                "sms": {
+                    "user": user_sms,
+                    "admin": admin_sms,
+                },
+
+                "cart_cleared": True,
+
+                "stock_updated": True,
+
+                "coupon_used": bool(
+                    order.coupon_id
+                ),
+            },
+            status=status.HTTP_200_OK,
+        )
