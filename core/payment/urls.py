@@ -1,9 +1,26 @@
 from django.urls import path
 
+from .views import (
+    PaymentCreateAPIView,
+    PaymentCallbackAPIView,
+)
+
 
 app_name = "payment"
 
+
 urlpatterns = [
-    # path("request/<int:order_id>/", PaymentRequestApiView.as_view(), name="request"),
-    # path("verify/", PaymentVerifyApiView.as_view(), name="verify"),
+
+    path(
+        "create/",
+        PaymentCreateAPIView.as_view(),
+        name="payment-create",
+    ),
+
+    path(
+        "callback/",
+        PaymentCallbackAPIView.as_view(),
+        name="payment-callback",
+    ),
+
 ]
