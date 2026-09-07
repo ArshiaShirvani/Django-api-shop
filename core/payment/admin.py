@@ -1,92 +1,104 @@
 from django.contrib import admin
-from .models import PaymentModel, PaymentStatusType
-from django.utils.html import format_html
+
+from .models import Payment
 
 
-@admin.register(PaymentModel)
+@admin.register(Payment)
 class PaymentAdmin(admin.ModelAdmin):
-
-    
     list_display = (
         "id",
-        "authority_id",
-        "ref_id",
+        "order",
+        "user",
         "amount",
-        "status_colored",
-        "response_code",
+        "currency",
+        "gateway",
+        "status",
+        "authority",
+        "reference_id",
         "created_date",
     )
 
     list_filter = (
         "status",
+        "gateway",
+        "currency",
         "created_date",
     )
 
     search_fields = (
-        "authority_id",
-        "ref_id",
+        "authority",
+        "reference_id",
+        "order__tracking_code",
+        "user__phone_number",
     )
 
-    ordering = ("-created_date",)
-
-    
     readonly_fields = (
-        "authority_id",
-        "ref_id",
+        "order",
+        "user",
         "amount",
+        "currency",
+        "gateway",
         "status",
-        "response_code",
-        "response_json",
+        "authority",
+        "reference_id",
+        "gateway_data",
+        "error_code",
+        "error_message",
         "created_date",
         "updated_date",
     )
 
-    
-    fieldsets = (
-        ("اطلاعات پرداخت", {
-            "fields": (
-                "authority_id",
-                "ref_id",
-                "amount",
-                "status",
-                "response_code",
-            )
-        }),
-        ("جزئیات پاسخ درگاه", {
-            "fields": ("response_json",),
-            "classes": ("collapse",)
-        }),
-        ("اطلاعات زمانی", {
-            "fields": ("created_date", "updated_date")
-        }),
+    autocomplete_fields = (
+        "order",
+        "user",
     )
 
-    
-    def status_colored(self, obj):
-        color_map = {
-            PaymentStatusType.PENDING: "#f39c12",
-            PaymentStatusType.SUCCESS: "#27ae60",
-            PaymentStatusType.FAILED: "#e74c3c",
-        }
-        label_map = {
-            PaymentStatusType.PENDING: "در انتظار",
-            PaymentStatusType.SUCCESS: "موفق",
-            PaymentStatusType.FAILED: "ناموفق",
-        }
-        color = color_map.get(obj.status, "black")
-        label = label_map.get(obj.status, "نامشخص")
-        return format_html(f'<b style="color:{color}">{label}</b>')
+    ordering = (
+        "-created_date",
+    )
 
-    status_colored.short_description = "وضعیت"
+    list_per_page = 25
 
-    
-    def has_change_permission(self, request, obj=None):
-        if obj and obj.status == PaymentStatusType.SUCCESS:
-            return False
-        return super().has_change_permission(request, obj)
-
-    
-    def has_delete_permission(self, request, obj=None):
-        if obj and obj.status == PaymentStatusType.SUCCESS:
-            return False
-        return super().has_delete_permission(request, obj)
+    fieldsets = (
+        (
+            "اطلاعات پرداخت",
+            {
+                "fields": (
+                    "order",
+                    "user",
+                    "amount",
+                    "currency",
+                    "gateway",
+                    "status",
+                )
+            },
+        ),
+        (
+            "اطلاعات درگاه",
+            {
+                "fields": (
+                    "authority",
+                    "reference_id",
+                    "gateway_data",
+                )
+            },
+        ),
+        (
+            "خطا",
+            {
+                "fields": (
+                    "error_code",
+                    "error_message",
+                )
+            },
+        ),
+        (
+            "تاریخ‌ها",
+            {
+                "fields": (
+                    "created_date",
+                    "updated_date",
+                )
+            },
+        ),
+    )
