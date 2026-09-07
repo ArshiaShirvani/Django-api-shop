@@ -351,7 +351,7 @@ class OrderAdmin(admin.ModelAdmin):
             {
                 "fields": (
                     "coupon",
-                    "coupon_code",
+                    
                 )
             },
         ),
