@@ -254,7 +254,8 @@ class FavoriteProductSerializer(serializers.ModelSerializer):
         variant = (
             obj.variants
             .filter(
-                is_active=True
+                is_active=True,
+                stock__gt=0,
             )
             .order_by("price")
             .first()
