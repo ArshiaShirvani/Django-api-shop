@@ -20,6 +20,7 @@ from .serializers import (
     PaymentSerializer,
 )
 from .services import PaymentService
+from django.shortcuts import redirect
 
 
 # =========================================================
@@ -141,7 +142,20 @@ class PaymentCreateAPIView(APIView):
 # PAYMENT CALLBACK
 # =========================================================
 
+
 class PaymentCallbackAPIView(APIView):
+
+    # =========================================================
+    # FRONTEND URLS
+    # =========================================================
+
+    FRONTEND_SUCCESS_URL = (
+        "http://localhost:3000/checkout/success"
+    )
+
+    FRONTEND_FAILED_URL = (
+        "http://localhost:3000/checkout/failed"
+    )
 
     @extend_schema(
         tags=["Payment"],
@@ -174,12 +188,9 @@ class PaymentCallbackAPIView(APIView):
 
         if not authority:
 
-            return Response(
-                {
-                    "success": False,
-                    "message": "Authority دریافت نشد.",
-                },
-                status=status.HTTP_400_BAD_REQUEST,
+            return redirect(
+                f"{self.FRONTEND_FAILED_URL}"
+                f"?reason=missing_authority"
             )
 
         # =================================================
@@ -200,13 +211,9 @@ class PaymentCallbackAPIView(APIView):
 
         except Payment.DoesNotExist:
 
-            return Response(
-                {
-                    "success": False,
-                    "message": "پرداخت مورد نظر پیدا نشد.",
-                    "authority": authority,
-                },
-                status=status.HTTP_404_NOT_FOUND,
+            return redirect(
+                f"{self.FRONTEND_FAILED_URL}"
+                f"?reason=payment_not_found"
             )
 
         # =================================================
@@ -217,42 +224,11 @@ class PaymentCallbackAPIView(APIView):
 
             order = payment.order
 
-            return Response(
-                {
-                    "success": True,
-
-                    "message": (
-                        "این پرداخت قبلاً با موفقیت "
-                        "تأیید شده است."
-                    ),
-
-                    "payment": PaymentSerializer(
-                        payment
-                    ).data,
-
-                    "order": OrderSerializer(
-                        order
-                    ).data,
-
-                    "sms": {
-                        "user": (
-                            "پرداخت این سفارش قبلاً "
-                            "با موفقیت ثبت شده است."
-                        ),
-
-                        "admin": (
-                            "این سفارش قبلاً با موفقیت "
-                            "پرداخت شده است."
-                        ),
-                    },
-
-                    "cart_cleared": True,
-                    "stock_updated": True,
-                    "coupon_used": bool(
-                        order.coupon_id
-                    ),
-                },
-                status=status.HTTP_200_OK,
+            return redirect(
+                f"{self.FRONTEND_SUCCESS_URL}"
+                f"?tracking_code={order.tracking_code}"
+                f"&order_id={order.id}"
+                f"&payment_id={payment.id}"
             )
 
         # =================================================
@@ -298,32 +274,15 @@ class PaymentCallbackAPIView(APIView):
             )
 
             # -------------------------------------------------
-            # در پرداخت لغو شده:
-            #
             # Cart دست نمی‌خورد
             # Stock دست نمی‌خورد
             # Coupon مصرف نمی‌شود
             # -------------------------------------------------
 
-            return Response(
-                {
-                    "success": False,
-
-                    "message": "پرداخت لغو شد.",
-
-                    "payment": PaymentSerializer(
-                        payment
-                    ).data,
-
-                    "order": OrderSerializer(
-                        payment.order
-                    ).data,
-
-                    "cart_unchanged": True,
-                    "stock_unchanged": True,
-                    "coupon_unchanged": True,
-                },
-                status=status.HTTP_400_BAD_REQUEST,
+            return redirect(
+                f"{self.FRONTEND_FAILED_URL}"
+                f"?payment_id={payment.id}"
+                f"&reason=canceled"
             )
 
         # =================================================
@@ -343,25 +302,10 @@ class PaymentCallbackAPIView(APIView):
             else:
                 detail = exc.messages
 
-            return Response(
-                {
-                    "success": False,
-
-                    "message": (
-                        "خطا در تأیید و نهایی کردن پرداخت."
-                    ),
-
-                    "detail": detail,
-
-                    "payment": PaymentSerializer(
-                        payment
-                    ).data,
-
-                    "cart_unchanged": True,
-                    "stock_unchanged": True,
-                    "coupon_unchanged": True,
-                },
-                status=status.HTTP_400_BAD_REQUEST,
+            return redirect(
+                f"{self.FRONTEND_FAILED_URL}"
+                f"?payment_id={payment.id}"
+                f"&reason=verify_error"
             )
 
         # =================================================
@@ -372,37 +316,10 @@ class PaymentCallbackAPIView(APIView):
 
             payment = result["payment"]
 
-            return Response(
-                {
-                    "success": False,
-
-                    "message": (
-                        "پرداخت توسط زرین‌پال "
-                        "تأیید نشد."
-                    ),
-
-                    "payment": PaymentSerializer(
-                        payment
-                    ).data,
-
-                    "order": OrderSerializer(
-                        payment.order
-                    ).data,
-
-                    "error_code": result.get(
-                        "error_code"
-                    ),
-
-                    "error_message": result.get(
-                        "error_message"
-                    ),
-
-                    # هیچ عملیات نهایی انجام نشده
-                    "cart_unchanged": True,
-                    "stock_unchanged": True,
-                    "coupon_unchanged": True,
-                },
-                status=status.HTTP_400_BAD_REQUEST,
+            return redirect(
+                f"{self.FRONTEND_FAILED_URL}"
+                f"?payment_id={payment.id}"
+                f"&reason=payment_failed"
             )
 
         # =================================================
@@ -430,38 +347,13 @@ class PaymentCallbackAPIView(APIView):
         )
 
         # =================================================
-        # FINAL RESPONSE
+        # REDIRECT TO FRONTEND
         # =================================================
 
-        return Response(
-            {
-                "success": True,
-
-                "message": (
-                    "پرداخت با موفقیت تأیید شد "
-                    "و سفارش نهایی شد."
-                ),
-
-                "payment": PaymentSerializer(
-                    payment
-                ).data,
-
-                "order": OrderSerializer(
-                    order
-                ).data,
-
-                "sms": {
-                    "user": user_sms,
-                    "admin": admin_sms,
-                },
-
-                "cart_cleared": True,
-
-                "stock_updated": True,
-
-                "coupon_used": bool(
-                    order.coupon_id
-                ),
-            },
-            status=status.HTTP_200_OK,
+        return redirect(
+            f"{self.FRONTEND_SUCCESS_URL}"
+            f"?tracking_code={order.tracking_code}"
+            f"&order_id={order.id}"
+            f"&payment_id={payment.id}"
         )
+
