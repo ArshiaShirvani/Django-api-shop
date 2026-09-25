@@ -61,6 +61,7 @@ INSTALLED_APPS = [
     'website',
     'review',
     'dashboard',
+    'admin_panel',
 ]
 
 MIDDLEWARE = [
