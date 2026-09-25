@@ -151,6 +151,8 @@ class CouponApplySerializer(serializers.Serializer):
         return attrs
 
 
+
+
 # =========================================================
 # ORDER ITEM
 # =========================================================
@@ -159,12 +161,15 @@ class OrderItemSerializer(serializers.ModelSerializer):
 
     final_price = serializers.SerializerMethodField()
 
+    main_image = serializers.SerializerMethodField()
+
     class Meta:
         model = OrderItem
 
         fields = (
             "id",
             "product_title",
+            "main_image",
             "size",
             "color",
             "sku",
@@ -179,6 +184,24 @@ class OrderItemSerializer(serializers.ModelSerializer):
     def get_final_price(self, obj):
 
         return obj.unit_price
+
+    def get_main_image(self, obj):
+
+        product = obj.variant.product
+
+        image = product.main_image
+
+        if not image:
+            return None
+
+        request = self.context.get("request")
+
+        if request:
+            return request.build_absolute_uri(
+                image.image.url
+            )
+
+        return image.image.url
 
 
 # =========================================================
