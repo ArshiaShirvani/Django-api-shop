@@ -374,7 +374,7 @@ class HomeCategory(models.Model):
             ).count()
 
 
-            if count >= 5:
+            if count >= 6:
 
                 raise ValidationError(
                     "حداکثر ۵ دسته در صفحه اصلی فعال باشد."
