@@ -1,5 +1,7 @@
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.urls import reverse
+from django.shortcuts import redirect
+from django.utils import timezone
 
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
@@ -14,13 +16,17 @@ from drf_spectacular.utils import (
 from order.models import Order
 from order.serializers import OrderSerializer
 
+from accounts.models import User
+from accounts.sms import send_sms
+
 from .models import Payment, PaymentStatus
 from .serializers import (
     PaymentCreateSerializer,
     PaymentSerializer,
 )
 from .services import PaymentService
-from django.shortcuts import redirect
+
+import jdatetime
 
 
 # =========================================================
@@ -141,7 +147,6 @@ class PaymentCreateAPIView(APIView):
 # =========================================================
 # PAYMENT CALLBACK
 # =========================================================
-
 
 class PaymentCallbackAPIView(APIView):
 
@@ -274,6 +279,33 @@ class PaymentCallbackAPIView(APIView):
             )
 
             # -------------------------------------------------
+            # SMS ناموفق فقط برای مشتری
+            # -------------------------------------------------
+
+            profile = getattr(payment.user, "profile", None)
+
+            if profile:
+                customer_name = profile.get_fullname()
+            else:
+                customer_name = "کاربر"
+
+            if customer_name == "کاربر جدید":
+                customer_name = "کاربر"
+
+            failed_sms = (
+                f"{customer_name} عزیز، پرداخت سفارش شما ناموفق بود.\n\n"
+                "لطفاً مجدداً برای پرداخت اقدام کنید.\n"
+                "در صورت کسر وجه، مبلغ طبق روال بانکی "
+                "به حساب شما بازگردانده خواهد شد.\n\n"
+                "فروشگاه لوما"
+            )
+
+            send_sms(
+                to=payment.user.phone_number,
+                text=failed_sms,
+            )
+
+            # -------------------------------------------------
             # Cart دست نمی‌خورد
             # Stock دست نمی‌خورد
             # Coupon مصرف نمی‌شود
@@ -295,12 +327,7 @@ class PaymentCallbackAPIView(APIView):
                 payment=payment
             )
 
-        except DjangoValidationError as exc:
-
-            if hasattr(exc, "message_dict"):
-                detail = exc.message_dict
-            else:
-                detail = exc.messages
+        except DjangoValidationError:
 
             return redirect(
                 f"{self.FRONTEND_FAILED_URL}"
@@ -316,6 +343,19 @@ class PaymentCallbackAPIView(APIView):
 
             payment = result["payment"]
 
+            failed_sms = (
+                "پرداخت سفارش شما ناموفق بود.\n\n"
+                "لطفاً مجدداً برای پرداخت اقدام کنید.\n"
+                "در صورت کسر وجه، مبلغ طبق روال بانکی "
+                "به حساب شما بازگردانده خواهد شد.\n\n"
+                "فروشگاه لوما"
+            )
+
+            send_sms(
+                to=payment.user.phone_number,
+                text=failed_sms,
+            )
+
             return redirect(
                 f"{self.FRONTEND_FAILED_URL}"
                 f"?payment_id={payment.id}"
@@ -330,21 +370,88 @@ class PaymentCallbackAPIView(APIView):
         order = result["order"]
 
         # =================================================
-        # SMS
+        # PAYMENT DATE & TIME - SHAMSI
         # =================================================
 
-        user_sms = (
-            f"پرداخت سفارش شما با موفقیت انجام شد. "
-            f"شماره پیگیری: {order.tracking_code} "
-            f"- مبلغ: {payment.amount}"
+        payment_datetime = timezone.localtime(
+            payment.updated_date
         )
 
-        admin_sms = (
-            f"سفارش جدید با موفقیت پرداخت شد. "
-            f"شماره پیگیری: {order.tracking_code} "
-            f"- کاربر: {payment.user.phone_number} "
-            f"- مبلغ: {payment.amount}"
+        jalali_datetime = jdatetime.datetime.fromgregorian(
+            datetime=payment_datetime
         )
+
+        payment_date = jalali_datetime.strftime(
+            "%Y/%m/%d"
+        )
+
+        payment_time = jalali_datetime.strftime(
+            "%H:%M"
+        )
+
+        # =================================================
+        # SMS SUCCESS - USER
+        # =================================================
+
+        profile = getattr(payment.user, "profile", None)
+
+        if profile:
+            customer_name = profile.get_fullname()
+        else:
+            customer_name = "کاربر"
+
+        if customer_name == "کاربر جدید":
+            customer_name = "کاربر"
+
+        user_sms = (
+            f"{customer_name} عزیز، پرداخت سفارش شما با موفقیت انجام شد.\n\n"
+            f"کد پیگیری سفارش: {order.tracking_code}\n"
+            f"مبلغ پرداختی: {payment.amount:,} ریال\n\n"
+            "از خرید شما سپاسگزاریم ❤️\n\n"
+            "فروشگاه لوما"
+        )
+
+        send_sms(
+            to=payment.user.phone_number,
+            text=user_sms,
+        )
+
+        # =================================================
+        # FIND ADMINS
+        # =================================================
+
+        admins = (
+            User.objects
+            .filter(
+                role=User.Roles.ADMIN
+            )
+            .values_list(
+                "phone_number",
+                flat=True
+            )
+        )
+
+        # =================================================
+        # SMS SUCCESS - ADMINS
+        # =================================================
+
+        admin_sms = (
+            "یک پرداخت موفق ثبت شد.\n\n"
+            f"کد سفارش: {order.tracking_code}\n"
+            f"شماره مشتری: {payment.user.phone_number}\n"
+            f"مبلغ پرداختی: {payment.amount:,} ریال\n"
+            f"تاریخ پرداخت: {payment_date}\n"
+            f"ساعت پرداخت: {payment_time}\n\n"
+            "سفارش آماده بررسی است.\n\n"
+            "فروشگاه لوما"
+        )
+
+        for admin_phone in admins:
+
+            send_sms(
+                to=admin_phone,
+                text=admin_sms,
+            )
 
         # =================================================
         # REDIRECT TO FRONTEND
@@ -356,4 +463,3 @@ class PaymentCallbackAPIView(APIView):
             f"&order_id={order.id}"
             f"&payment_id={payment.id}"
         )
-
