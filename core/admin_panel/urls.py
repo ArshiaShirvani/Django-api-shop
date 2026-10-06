@@ -42,4 +42,14 @@ urlpatterns = [
         "reviews/",
         include("admin_panel.urls.reviews"),
     ),
+    
+    path(
+            "website/",
+            include("admin_panel.urls.website"),
+        ),
+    
+    path(
+        "tickets/",
+        include("admin_panel.urls.tickets"),
+    ),
 ]
