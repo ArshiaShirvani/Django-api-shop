@@ -17,6 +17,8 @@ from order.models import (
     OrderStatus,
 )
 
+from accounts.sms import send_sms
+
 from admin_panel.permissions import IsAdminPanelUser
 
 from admin_panel.serializers.orders import (
@@ -544,8 +546,15 @@ class AdminOrderStatusUpdateAPIView(APIView):
 
         try:
 
-            order = Order.objects.get(
-                pk=pk
+            order = (
+                Order.objects
+                .select_related(
+                    "user",
+                    "user__profile",
+                )
+                .get(
+                    pk=pk
+                )
             )
 
         except Order.DoesNotExist:
@@ -644,6 +653,76 @@ class AdminOrderStatusUpdateAPIView(APIView):
                 "updated_date",
             ]
         )
+
+        # =================================================
+        # SEND ORDER STATUS SMS TO CUSTOMER
+        # =================================================
+
+        # برای PAID پیامک جداگانه ارسال نمی‌کنیم،
+        # چون در زمان پرداخت موفق، پیامک پرداخت برای مشتری ارسال شده است.
+
+        if new_status != OrderStatus.PAID:
+
+            profile = getattr(
+                order.user,
+                "profile",
+                None,
+            )
+
+            if profile:
+
+                customer_name = profile.get_fullname()
+
+            else:
+
+                customer_name = "کاربر"
+
+            if customer_name == "کاربر جدید":
+
+                customer_name = "کاربر"
+
+            # =================================================
+            # STATUS MESSAGE
+            # =================================================
+
+            status_messages = {
+
+                OrderStatus.PROCESSING: (
+                    "سفارش شما وارد مرحله آماده‌سازی شده است."
+                ),
+
+                OrderStatus.SHIPPED: (
+                    "سفارش شما ارسال شده است و "
+                    "به‌زودی به دست شما می‌رسد."
+                ),
+
+                OrderStatus.DELIVERED: (
+                    "سفارش شما با موفقیت تحویل داده شد."
+                ),
+
+                OrderStatus.CANCELLED: (
+                    "سفارش شما لغو شده است."
+                ),
+            }
+
+            status_message = status_messages.get(
+                new_status
+            )
+
+            if status_message:
+
+                order_status_sms = (
+                    f"{customer_name} عزیز،\n"
+                    f"{status_message}\n\n"
+                    f"کد پیگیری سفارش: "
+                    f"{order.tracking_code}\n\n"
+                    "فروشگاه لوما"
+                )
+
+                send_sms(
+                    to=order.user.phone_number,
+                    text=order_status_sms,
+                )
 
         # =================================================
         # RESPONSE
