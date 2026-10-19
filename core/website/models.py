@@ -448,3 +448,30 @@ class ContactMessage(models.Model):
 
     def __str__(self):
         return f"{self.name} - {self.subject}"
+    
+
+class WebsiteStatus(models.Model):
+
+    class Status(models.TextChoices):
+        RUNNING = "running", "در حال اجرا"
+        MAINTENANCE = "maintenance", "در حال تعمیر"
+        STOPPED = "stopped", "متوقف شده"
+
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.RUNNING,
+        verbose_name="وضعیت سایت",
+    )
+
+    updated_date = models.DateTimeField(
+        auto_now=True,
+        verbose_name="آخرین بروزرسانی",
+    )
+
+    class Meta:
+        verbose_name = "وضعیت سایت"
+        verbose_name_plural = "وضعیت سایت"
+
+    def __str__(self):
+        return self.get_status_display()
