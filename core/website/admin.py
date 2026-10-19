@@ -1,5 +1,6 @@
 from django.contrib import admin
 from django.utils.html import format_html
+from django.core.exceptions import ValidationError
 
 from .models import (
     WebsiteSetting,
@@ -7,6 +8,7 @@ from .models import (
     SecondaryBanner,
     HomeCategory,
     ContactMessage,
+    WebsiteStatus,
 )
 
 
@@ -618,3 +620,139 @@ class ContactMessageAdmin(admin.ModelAdmin):
             request,
             f"{updated} پیام به عنوان خوانده‌نشده علامت‌گذاری شد."
         )
+        
+
+@admin.register(WebsiteStatus)
+class WebsiteStatusAdmin(admin.ModelAdmin):
+
+    # =========================================================
+    # LIST DISPLAY
+    # =========================================================
+
+    list_display = (
+        "id",
+        "status_display",
+        "updated_date",
+    )
+
+    # =========================================================
+    # LIST FILTER
+    # =========================================================
+
+    list_filter = (
+        "status",
+        "updated_date",
+    )
+
+    # =========================================================
+    # SEARCH
+    # =========================================================
+
+    search_fields = (
+        "status",
+    )
+
+    # =========================================================
+    # DEFAULT ORDERING
+    # =========================================================
+
+    ordering = (
+        "-updated_date",
+    )
+
+    # =========================================================
+    # READONLY FIELDS
+    # =========================================================
+
+    readonly_fields = (
+        "updated_date",
+    )
+
+    # =========================================================
+    # FORM LAYOUT
+    # =========================================================
+
+    fieldsets = (
+        (
+            "وضعیت فعلی سایت",
+            {
+                "fields": (
+                    "status",
+                ),
+                "description": (
+                    "وضعیت فعلی سایت را انتخاب کنید. "
+                    "این وضعیت توسط سیستم برای کنترل دسترسی "
+                    "به سایت استفاده خواهد شد."
+                ),
+            },
+        ),
+        (
+            "اطلاعات سیستم",
+            {
+                "fields": (
+                    "updated_date",
+                ),
+            },
+        ),
+    )
+
+    # =========================================================
+    # CUSTOM DISPLAY
+    # =========================================================
+
+    @admin.display(
+        description="وضعیت سایت",
+        ordering="status",
+    )
+    def status_display(self, obj):
+
+        return obj.get_status_display()
+
+    # =========================================================
+    # PREVENT MULTIPLE RECORDS
+    # =========================================================
+
+    def has_add_permission(self, request):
+
+        if WebsiteStatus.objects.exists():
+            return False
+
+        return super().has_add_permission(request)
+
+    # =========================================================
+    # SAVE VALIDATION
+    # =========================================================
+
+    def save_model(
+        self,
+        request,
+        obj,
+        form,
+        change,
+    ):
+
+        if not change:
+
+            if WebsiteStatus.objects.exists():
+                raise ValidationError(
+                    "تنها یک رکورد وضعیت سایت مجاز است."
+                )
+
+        super().save_model(
+            request,
+            obj,
+            form,
+            change,
+        )
+
+    # =========================================================
+    # DELETE
+    # =========================================================
+
+    def has_delete_permission(
+        self,
+        request,
+        obj=None,
+    ):
+
+        return False
