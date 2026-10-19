@@ -1,5 +1,8 @@
 from django.db.models import Q
+from django.utils import timezone
 from django.utils.dateparse import parse_date
+
+import jdatetime
 
 from rest_framework import status
 from rest_framework.response import Response
@@ -11,6 +14,9 @@ from drf_spectacular.utils import (
     OpenApiResponse,
     OpenApiTypes,
 )
+
+from accounts.models import User
+from accounts.sms import send_sms
 
 from admin_panel.permissions import IsAdminPanelUser
 
@@ -308,7 +314,12 @@ class AdminCouponCreateAPIView(APIView):
     @extend_schema(
         tags=["Admin Panel - Coupons"],
         summary="ایجاد کد تخفیف",
-        description="یک کد تخفیف جدید ایجاد می‌کند.",
+        description=(
+            "یک کد تخفیف جدید ایجاد می‌کند و بلافاصله "
+            "پیامک کد تخفیف را برای کاربران ارسال می‌کند. "
+            "اگر کد همگانی باشد، پیامک برای تمام کاربران فعال ارسال می‌شود. "
+            "اگر کد اختصاصی باشد، فقط برای کاربران انتخاب‌شده ارسال می‌شود."
+        ),
         request=AdminCouponCreateSerializer,
         responses={
             201: AdminCouponDetailSerializer,
@@ -318,6 +329,10 @@ class AdminCouponCreateAPIView(APIView):
         },
     )
     def post(self, request):
+
+        # =================================================
+        # CREATE COUPON
+        # =================================================
 
         serializer = AdminCouponCreateSerializer(
             data=request.data
@@ -329,10 +344,166 @@ class AdminCouponCreateAPIView(APIView):
 
         coupon = serializer.save()
 
-        return Response(
+        # =================================================
+        # GET USERS
+        # =================================================
+
+        if coupon.is_global:
+
+            users = (
+                User.objects
+                .filter(
+                    is_active=True,
+                )
+                .select_related(
+                    "profile",
+                )
+            )
+
+        else:
+
+            users = (
+                coupon.users
+                .filter(
+                    is_active=True,
+                )
+                .select_related(
+                    "profile",
+                )
+            )
+
+        # =================================================
+        # DISCOUNT TEXT
+        # =================================================
+
+        if (
+            coupon.discount_type
+            == Coupon.DiscountType.PERCENTAGE
+        ):
+
+            discount_text = (
+                f"{coupon.discount_value}٪"
+            )
+
+        else:
+
+            discount_text = (
+                f"{coupon.discount_value:,} ریال"
+            )
+
+        # =================================================
+        # MINIMUM ORDER TEXT
+        # =================================================
+
+        if coupon.minimum_order_amount > 0:
+
+            minimum_order_text = (
+                f"{coupon.minimum_order_amount:,} ریال"
+            )
+
+        else:
+
+            minimum_order_text = "بدون حداقل خرید"
+
+        # =================================================
+        # END DATE - SHAMSI
+        # =================================================
+
+        end_datetime = timezone.localtime(
+            coupon.end_date
+        )
+
+        jalali_end_datetime = (
+            jdatetime.datetime.fromgregorian(
+                datetime=end_datetime
+            )
+        )
+
+        end_date = jalali_end_datetime.strftime(
+            "%Y/%m/%d"
+        )
+
+        # =================================================
+        # SEND SMS
+        # =================================================
+
+        sent_count = 0
+
+        for user in users:
+
+            profile = getattr(
+                user,
+                "profile",
+                None,
+            )
+
+            if profile:
+
+                customer_name = (
+                    profile.get_fullname()
+                )
+
+            else:
+
+                customer_name = "کاربر"
+
+            if customer_name == "کاربر جدید":
+
+                customer_name = "کاربر"
+
+            # =================================================
+            # SMS TEXT
+            # =================================================
+
+            coupon_sms = (
+                f"{customer_name} عزیز،\n\n"
+                "یک کد تخفیف ویژه برای شما فعال شده است 🎁\n\n"
+                f"کد تخفیف: {coupon.code}\n"
+                f"میزان تخفیف: {discount_text}\n"
+                f"حداقل خرید: {minimum_order_text}\n"
+                f"اعتبار تا: {end_date}\n\n"
+                "برای استفاده از این کد، "
+                "هنگام ثبت سفارش آن را وارد کنید.\n\n"
+                "فروشگاه لوما"
+            )
+
+            send_sms(
+                to=user.phone_number,
+                text=coupon_sms,
+            )
+
+            sent_count += 1
+
+        # =================================================
+        # GET FRESH COUPON
+        # =================================================
+
+        coupon = (
+            Coupon.objects
+            .prefetch_related(
+                "users",
+            )
+            .get(
+                pk=coupon.pk
+            )
+        )
+
+        # =================================================
+        # RESPONSE
+        # =================================================
+
+        response_data = (
             AdminCouponDetailSerializer(
                 coupon
-            ).data,
+            ).data
+        )
+
+        response_data["sms_sent_count"] = (
+            sent_count
+        )
+
+        return Response(
+            response_data,
             status=status.HTTP_201_CREATED,
         )
 
