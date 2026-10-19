@@ -72,6 +72,7 @@ MIDDLEWARE = [
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
+    "core.middleware.WebsiteStatusMiddleware",
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
@@ -133,7 +134,8 @@ AUTH_PASSWORD_VALIDATORS = [
 
 LANGUAGE_CODE = 'en-us'
 
-TIME_ZONE = 'UTC'
+TIME_ZONE = "Asia/Tehran"
+
 
 USE_I18N = True
 
@@ -205,3 +207,15 @@ PAYMENT_SUCCESS_URL = "http://localhost:3000/payment/success"
 PAYMENT_FAILED_URL = "http://localhost:3000/payment/failed"
 
 ZARINPAL_SANDBOX = True
+
+
+
+# =========================================================
+# MELIPAYAMAK SMS
+# =========================================================
+
+MELIPAYAMAK_SMS_URL = (
+    "https://console.melipayamak.com/api/send/simple/"
+    "YOUR_API_KEY"
+)
+MELIPAYAMAK_SENDER = "50004001512961"
