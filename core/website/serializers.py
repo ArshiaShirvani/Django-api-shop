@@ -6,6 +6,7 @@ from .models import (
     SecondaryBanner,
     HomeCategory,
     ContactMessage,
+    WebsiteStatus,
 )
 
 
@@ -223,4 +224,23 @@ class ContactMessageSerializer(serializers.ModelSerializer):
         read_only_fields = (
             "id",
             "created_date",
+        )
+        
+class AdminWebsiteStatusSerializer(serializers.ModelSerializer):
+
+    status_display = serializers.CharField(
+        source="get_status_display",
+        read_only=True,
+    )
+
+    class Meta:
+        model = WebsiteStatus
+        fields = (
+            "status",
+            "status_display",
+            "updated_date",
+        )
+        read_only_fields = (
+            "status_display",
+            "updated_date",
         )
